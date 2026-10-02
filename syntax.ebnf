@@ -1,0 +1,115 @@
+top_level
+    = import_stmt
+    | extern_stmt
+    | name_decl
+    | name_defn
+    | fn_defn
+    | macro_defn;
+
+lower = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z";
+upper = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z";
+digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+name = (lower | upper | "_"), { lower | upper | "_" | digit };
+
+hex = digit | "A" | "B" | "C" | "D" | "E" | "F";
+bin = "0" | "1";
+oct = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7";
+
+int_lit = ["+" | "-"], ((digit, { digit }) | ("0x", hex, { hex }) | ("0b", bin, { bin }) | ("0o", oct, { oct })), ["u"], ["c" | "s" | "l" | "ll"];
+float_lit = ["+" | "-"], (digit, { digit }, ".", digit, { digit }, ["e", ["+" | "-"], digit, { digit }]), ("f" | "d");
+array_lit = "{", [expr, { ",", expr }], "}";
+struct_lit = "{", [name, "=", expr, { ",", name, "=", expr }], "}";
+union_lit = "{", name, "=", expr, "}";
+
+unary_aop = "+" | "-";
+binary_aop_0 = "*" | "/" | "%";
+binary_aop_1 = "+" | "-";
+binary_rop = "==" | "!=" | "<" | "<=" | ">" | ">=";
+
+int_primary
+    = int_lit
+    | name
+    | ("(", int_expr, ")")
+    | (unary_aop, int_expr);
+int_expr
+    = int_lit
+    | name
+    | ("(", int_expr, ")")
+    | (unary_aop, int_expr) 
+    | (int_primary, binary_aop_0, int_expr)
+    | (int_primary, binary_aop_1, int_expr);
+
+float_primary
+    = float_lit
+    | name
+    | ("(", float_expr, ")")
+    | (unary_aop, float_expr);
+float_expr
+    = float_lit
+    | fn_call
+    | name
+    | ("(", float_expr, ")")
+    | (unary_aop, float_expr)
+    | (float_primary, binary_aop_0, float_expr)
+    | (float_primary, binary_aop_1, float_expr);
+
+bool_primary
+    = "true"
+    | "false"
+    | fn_call
+    | name
+    | ("(", bool_expr, ")")
+    | ("not", bool_expr);
+bool_expr
+    = "true"
+    | "false"
+    | fn_call
+    | name
+    | ("(", bool_expr, ")")
+    | ("not", bool_expr)
+    | (bool_primary, "and", bool_expr)
+    | (bool_primary, "or", bool_expr)
+    | (int_expr, binary_rop, int_expr)
+    | (float_expr, binary_rop, float_expr);
+
+pointer_expr
+    = fn_call
+    | name
+    | ("(", pointer_expr, ")")
+    | ("&", name)
+    | ("&", name, "[", int_expr, "]")
+    | ("&", name, ".", name);
+
+expr
+    = int_expr
+    | float_expr
+    | bool_expr
+    | array_lit
+    | struct_lit
+    | union_lit
+    | fn_call
+    | name
+    | ("(", expr, ")");
+
+name_decl = name, ":", name;
+name_defn = name, "=", name;
+
+fn_sig = "fn", name, "(", [name_decl, { ",", name_decl }], ")", ":", name;
+fn_defn = fn_sig, fn_scope;
+fn_scope = "{", { name_decl | name_defn | if_stmt | loop_stmt | return_stmt | fn_call }, "}";
+
+if_stmt = "if", bool_expr, "{", fn_scope, "}", {"elif", bool_expr, "{", fn_scope, "}"}, ["else", "{", fn_scope, "}"];
+
+loop_stmt = "loop", "{", fn_scope, "}";
+
+return_stmt = "return", [int_expr | float_expr | bool_expr];
+
+fn_call = name, "(", [expr, { ",", expr }], ")";
+
+import_stmt = "import", name, { ".", name };
+
+extern_stmt = "extern", fn_sig;
+
+any = ? any text permitted by the encoding ?;
+
+macro_defn = "macro", name, "(", [name_decl, { ",", name_decl }], ")", "{", any, "}";
