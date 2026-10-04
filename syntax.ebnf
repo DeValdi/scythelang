@@ -1,10 +1,13 @@
 top_level
-    = import_stmt
-    | extern_stmt
-    | name_decl
-    | name_defn
+    = { import_stmt }
+    , { extern_stmt }
+    , macro_defn
+    | type_defn
+    | alias_stmt
+    | var_decl
+    | var_defn
     | fn_defn
-    | macro_defn;
+    , { export_stmt };
 
 lower = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z";
 upper = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z";
@@ -15,101 +18,83 @@ hex = digit | "A" | "B" | "C" | "D" | "E" | "F";
 bin = "0" | "1";
 oct = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7";
 
+comp_args_decl = "<", many_var_decl, ">";
+comp_args_defn = "<", many_expr, ">";
+
 int_lit = ["+" | "-"], ((digit, { digit }) | ("0x", hex, { hex }) | ("0b", bin, { bin }) | ("0o", oct, { oct })), ["u"], ["c" | "s" | "l" | "ll"];
 float_lit = ["+" | "-"], (digit, { digit }, ".", digit, { digit }, ["e", ["+" | "-"], digit, { digit }]), ("f" | "d");
-array_lit = "{", [expr, { ",", expr }], "}";
-struct_lit = "{", [name, "=", expr, { ",", name, "=", expr }], "}";
-union_lit = "{", name, "=", expr, "}";
+bool_lit = "true" | "false";
+array_lit = "{", { expr, "," }, [expr], "}";
+struct_lit = name, [comp_args_defn], "{", many_var_defn, "}";
+union_lit = name, [comp_args_defn], "{", var_defn, "}";
+enum_lit = name, ".", name;
+literal = int_lit | float_lit | bool_lit | array_lit | struct_lit | union_lit | enum_lit;
 
-unary_aop = "+" | "-";
-binary_aop_0 = "*" | "/" | "%";
-binary_aop_1 = "+" | "-";
-binary_rop = "==" | "!=" | "<" | "<=" | ">" | ">=";
+struct_type_defn = "struct", name, [comp_args_decl], "{", many_var_decl, "}";
+union_type_defn = "union", name, [comp_args_decl], "{", many_var_decl, "}";
+enum_type_defn = "enum", name, [comp_args_decl], [ "[", name, "]" ], "{", many_var_decl, "}";
+type_defn = struct_type_defn | union_type_defn | enum_type_defn;
 
-int_primary
-    = int_lit
-    | name
-    | ("(", int_expr, ")")
-    | (unary_aop, int_expr);
-int_expr
-    = int_lit
-    | name
-    | ("(", int_expr, ")")
-    | (unary_aop, int_expr) 
-    | (int_primary, binary_aop_0, int_expr)
-    | (int_primary, binary_aop_1, int_expr);
+alias_stmt = "alias", name, [comp_args_decl], name, [comp_args_decl];
 
-float_primary
-    = float_lit
-    | name
-    | ("(", float_expr, ")")
-    | (unary_aop, float_expr);
-float_expr
-    = float_lit
+unary_op
+    = "+"
+    | "-"
+    | "not"
+    | "&" | "*"
+    | "!";
+
+binary_op
+    = "*"
+    | "/"
+    | "%"
+    | "+"
+    | "-"
+    | "=="
+    | "!="
+    | "<"
+    | "<="
+    | ">"
+    | ">="
+    | "and"
+    | "or";
+
+primary
+    = literal
     | fn_call
-    | name
-    | ("(", float_expr, ")")
-    | (unary_aop, float_expr)
-    | (float_primary, binary_aop_0, float_expr)
-    | (float_primary, binary_aop_1, float_expr);
-
-bool_primary
-    = "true"
-    | "false"
-    | fn_call
-    | name
-    | ("(", bool_expr, ")")
-    | ("not", bool_expr);
-bool_expr
-    = "true"
-    | "false"
-    | fn_call
-    | name
-    | ("(", bool_expr, ")")
-    | ("not", bool_expr)
-    | (bool_primary, "and", bool_expr)
-    | (bool_primary, "or", bool_expr)
-    | (int_expr, binary_rop, int_expr)
-    | (float_expr, binary_rop, float_expr);
-
-pointer_expr
-    = fn_call
-    | name
-    | ("(", pointer_expr, ")")
-    | ("&", name)
-    | ("&", name, "[", int_expr, "]")
-    | ("&", name, ".", name);
+    | name, { ".", name };
 
 expr
-    = int_expr
-    | float_expr
-    | bool_expr
-    | array_lit
-    | struct_lit
-    | union_lit
-    | fn_call
-    | name
-    | ("(", expr, ")");
+    = primary
+    | ("(", expr, ")")
+    | unary_op, expr
+    | primary, binary_op, expr;
+many_expr = { expr, "," }, [expr];
 
-name_decl = name, ":", name;
-name_defn = name, "=", name;
+var_decl = name, ":", name;
+many_var_decl = { var_decl, "," }, [var_decl];
 
-fn_sig = "fn", name, "(", [name_decl, { ",", name_decl }], ")", ":", name;
-fn_defn = fn_sig, fn_scope;
-fn_scope = "{", { name_decl | name_defn | if_stmt | loop_stmt | return_stmt | fn_call }, "}";
+var_defn = name, "=", name;
+many_var_defn = { var_defn, "," }, [var_defn];
 
-if_stmt = "if", bool_expr, "{", fn_scope, "}", {"elif", bool_expr, "{", fn_scope, "}"}, ["else", "{", fn_scope, "}"];
+fn_sig = "(", many_var_decl, ")", ":", name;
+fn_defn = "fn", name, fn_sig, fn_scope;
+fn_scope = "{", { var_decl | var_defn | if_stmt | loop_stmt | return_stmt | fn_call }, "}";
+
+if_stmt = "if", expr, "{", fn_scope, "}", {"elif", expr, "{", fn_scope, "}"}, ["else", "{", fn_scope, "}"];
 
 loop_stmt = "loop", "{", fn_scope, "}";
 
-return_stmt = "return", [int_expr | float_expr | bool_expr];
+return_stmt = "return", [expr];
 
-fn_call = name, "(", [expr, { ",", expr }], ")";
+fn_call = name, [comp_args_defn], "(", many_expr, ")";
 
 import_stmt = "import", name, { ".", name };
 
-extern_stmt = "extern", fn_sig;
+extern_stmt = "extern", name, fn_sig;
 
 any = ? any text permitted by the encoding ?;
 
-macro_defn = "macro", name, "(", [name_decl, { ",", name_decl }], ")", "{", any, "}";
+macro_defn = "macro", name, "(", many_var_decl, ")", "{", any, "}";
+
+export_stmt = "export", { name, "," }, [name];
