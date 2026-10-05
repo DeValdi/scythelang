@@ -21,21 +21,25 @@ oct = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7";
 comp_args_decl = "<", many_var_decl, ">";
 comp_args_defn = "<", many_expr, ">";
 
+generic_decl = name, [comp_args_decl];
+generic_defn = name, [comp_args_defn];
+
+
 int_lit = ["+" | "-"], ((digit, { digit }) | ("0x", hex, { hex }) | ("0b", bin, { bin }) | ("0o", oct, { oct })), ["u"], ["c" | "s" | "l" | "ll"];
 float_lit = ["+" | "-"], (digit, { digit }, ".", digit, { digit }, ["e", ["+" | "-"], digit, { digit }]), ("f" | "d");
 bool_lit = "true" | "false";
 array_lit = "{", { expr, "," }, [expr], "}";
-struct_lit = name, [comp_args_defn], "{", many_var_defn, "}";
-union_lit = name, [comp_args_defn], "{", var_defn, "}";
+struct_lit = generic_defn, "{", many_var_defn, "}";
+union_lit = generic_defn, "{", var_defn, "}";
 enum_lit = name, ".", name;
 literal = int_lit | float_lit | bool_lit | array_lit | struct_lit | union_lit | enum_lit;
 
-struct_type_defn = "struct", name, [comp_args_decl], "{", many_var_decl, "}";
-union_type_defn = "union", name, [comp_args_decl], "{", many_var_decl, "}";
-enum_type_defn = "enum", name, [comp_args_decl], [ "[", name, "]" ], "{", many_var_decl, "}";
+struct_type_defn = "struct", generic_decl, "{", many_var_decl, "}";
+union_type_defn = "union", generic_decl, "{", many_var_decl, "}";
+enum_type_defn = "enum", generic_decl, [ "[", name, "]" ], "{", many_var_decl, "}";
 type_defn = struct_type_defn | union_type_defn | enum_type_defn;
 
-alias_stmt = "alias", name, [comp_args_decl], name, [comp_args_decl];
+alias_stmt = "alias", generic_decl, generic_decl;
 
 unary_op
     = "+"
@@ -71,13 +75,13 @@ expr
     | primary, binary_op, expr;
 many_expr = { expr, "," }, [expr];
 
-var_decl = name, ":", name;
+var_decl = name, ":", generic_decl;
 many_var_decl = { var_decl, "," }, [var_decl];
 
 var_defn = name, "=", name;
 many_var_defn = { var_defn, "," }, [var_defn];
 
-fn_sig = "(", many_var_decl, ")", ":", name;
+fn_sig = "(", many_var_decl, ")", generic_decl;
 fn_defn = "fn", name, fn_sig, fn_scope;
 fn_scope = "{", { var_decl | var_defn | if_stmt | loop_stmt | return_stmt | fn_call }, "}";
 
