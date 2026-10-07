@@ -1,12 +1,12 @@
-top_level
+abstract_syntax_tree
     = { import_stmt }
-    , { extern_stmt }
-    , macro_defn
+    , { extern_stmt },
+    { macro_defn
     | type_defn
     | alias_stmt
     | var_decl
     | var_defn
-    | fn_defn
+    | fn_defn }
     , { export_stmt };
 
 lower = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z";
@@ -24,7 +24,6 @@ comp_args_defn = "<", many_expr, ">";
 generic_decl = name, [comp_args_decl];
 generic_defn = name, [comp_args_defn];
 
-
 int_lit = ["+" | "-"], ((digit, { digit }) | ("0x", hex, { hex }) | ("0b", bin, { bin }) | ("0o", oct, { oct })), ["u"], ["c" | "s" | "l" | "ll"];
 float_lit = ["+" | "-"], (digit, { digit }, ".", digit, { digit }, ["e", ["+" | "-"], digit, { digit }]), ("f" | "d");
 bool_lit = "true" | "false";
@@ -34,12 +33,12 @@ union_lit = generic_defn, "{", var_defn, "}";
 enum_lit = name, ".", name;
 literal = int_lit | float_lit | bool_lit | array_lit | struct_lit | union_lit | enum_lit;
 
-struct_type_defn = "struct", generic_decl, "{", many_var_decl, "}";
-union_type_defn = "union", generic_decl, "{", many_var_decl, "}";
-enum_type_defn = "enum", generic_decl, [ "[", name, "]" ], "{", many_var_decl, "}";
-type_defn = struct_type_defn | union_type_defn | enum_type_defn;
+struct_defn = "struct", generic_decl, "{", many_var_decl, "}";
+union_defn = "union", generic_decl, "{", many_var_decl, "}";
+enum_defn = "enum", generic_decl, [ "[", name, "]" ], "{", many_var_decl, "}";
+type_defn = struct_defn | union_defn | enum_defn;
 
-alias_stmt = "alias", generic_decl, generic_decl;
+alias_stmt = "alias", generic_decl, "=", generic_decl;
 
 unary_op
     = "+"
@@ -72,7 +71,9 @@ expr
     = primary
     | ("(", expr, ")")
     | unary_op, expr
-    | primary, binary_op, expr;
+    | primary, binary_op, expr
+    | primary, "[", expr, "]"
+    | "fn", fn_sig, fn_scope;
 many_expr = { expr, "," }, [expr];
 
 var_decl = name, ":", generic_decl;
