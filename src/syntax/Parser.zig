@@ -170,7 +170,7 @@ fn restore(self: *Parser) !void {
 //     }
 // }
 
-fn parseRange(self: *Parser, comptime range: []const [2]u8) ![]const u8 {
+fn parseRange(self: *Parser, comptime range: anytype) ![]const u8 {
     var buffer: std.ArrayList(u8) = .empty;
     while (true) {
         const c = self.reader.interface.takeByte() catch |err| switch (err) {
@@ -178,7 +178,13 @@ fn parseRange(self: *Parser, comptime range: []const [2]u8) ![]const u8 {
             else => return err,
         };
         const matches = for (range) |r| {
-            if (c >= r[0] and c <= r[1]) break true;
+            if (switch (@TypeOf(r)) {
+                [2]u8 => c >= r[0] and c <= r[1],
+                u8 => c == r,
+                else => @compileError("range argument must be a slice of [2]u8 or u8"),
+            }) {
+                break true;
+            }
         } else false;
         if (!matches) {
             try self.reader.seekBy(-1);
@@ -199,7 +205,7 @@ fn parseRange(self: *Parser, comptime range: []const [2]u8) ![]const u8 {
             else => col += 1,
         }
     }
-    std.debug.print("line: {}, col: {}\n", .{ line, col });
+    // std.debug.print("line: {}, col: {}\n", .{ line, col });
     last_ptr.line = line;
     last_ptr.col = col;
     return buffer.items;
@@ -215,7 +221,7 @@ fn parseName(self: *Parser) ParseResult([]const u8) {
 }
 
 fn consumeWhitespace(self: *Parser) ParseResult(void) {
-    const ws = try self.parseRange(&[_][2]u8{ .{ ' ', ' ' }, .{ '\t', '\t' }, .{ '\r', '\r' }, .{ '\n', '\n' } });
+    const ws = try self.parseRange(&[_]u8{ ' ', '\t', '\r', '\n' });
     if (ws.len == 0) {
         return .{ .failure = "Failed to parse whitespace" };
     }
