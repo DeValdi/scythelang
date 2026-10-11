@@ -1,10 +1,10 @@
 abstract_syntax_tree
-    = { import_stmt }
-    , { extern_stmt },
+    = { import_stmt },
     { macro_defn
     | type_defn
     | alias_stmt
     | var_decl
+    | fn_decl
     | var_defn
     | fn_defn }
     , { export_stmt };
@@ -41,14 +41,17 @@ type_defn = struct_defn | union_defn | enum_defn;
 alias_stmt = "alias", generic_decl, "=", generic_decl;
 
 unary_op
-    = "+"
+    = "~"
+    | "+"
     | "-"
     | "not"
-    | "&" | "*"
-    | "!";
+    | "&" | "*";
 
 binary_op
-    = "*"
+    = "&"
+    | "^"
+    | "|"
+    | "*"
     | "/"
     | "%"
     | "+"
@@ -73,7 +76,7 @@ expr
     | unary_op, expr
     | primary, binary_op, expr
     | primary, "[", expr, "]"
-    | "fn", fn_sig, fn_scope;
+    | "fn", fn_sig, "{", fn_scope, "}";
 many_expr = { expr, "," }, [expr];
 
 var_decl = name, ":", generic_decl;
@@ -83,23 +86,31 @@ var_defn = name, "=", name;
 many_var_defn = { var_defn, "," }, [var_defn];
 
 fn_sig = "(", many_var_decl, ")", generic_decl;
-fn_defn = "fn", name, fn_sig, fn_scope;
-fn_scope = "{", { var_decl | var_defn | if_stmt | loop_stmt | return_stmt | fn_call }, "}";
+fn_defn = "fn", name, fn_sig, "{", fn_scope, "}";
+fn_scope = { var_decl | var_defn | if_stmt | for_stmt | return_stmt | break_stmt | continue_stmt | fn_call };
 
-if_stmt = "if", expr, "{", fn_scope, "}", {"elif", expr, "{", fn_scope, "}"}, ["else", "{", fn_scope, "}"];
+if_stmt = "if", [ var_defn, ";" ], expr, "{", fn_scope, "}", {"elif", expr, "{", fn_scope, "}"}, ["else", "{", fn_scope, "}"];
 
-loop_stmt = "loop", "{", fn_scope, "}";
+for_stmt = "for", var_defn, ";", expr, ";", fn_scope, "{", fn_scope, "}";
 
 return_stmt = "return", [expr];
 
+break_stmt = "break", [expr];
+
+continue_stmt = "continue", [expr];
+
+yield_stmt = "yield", [expr];
+
 fn_call = name, [comp_args_defn], "(", many_expr, ")";
+
+macro_call = "!", name, "(", { any }, ")"; (* unused, since pre-/postparsed*)
 
 import_stmt = "import", name, { ".", name };
 
-extern_stmt = "extern", name, fn_sig;
+fn_decl = name, fn_sig;
 
 any = ? any text permitted by the encoding ?;
 
-macro_defn = "macro", name, "(", many_var_decl, ")", "{", any, "}";
+macro_defn = ("smacro" | "cmacro"), name, "(", many_var_decl, ")", "{", any, "}";
 
 export_stmt = "export", { name, "," }, [name];
