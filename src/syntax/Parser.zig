@@ -4,7 +4,7 @@ const types = @import("types.zig");
 const Parser = @This();
 
 const ParseFrame = struct {
-    start: u64 = 0,
+    pos: u64 = 0,
     line: u64 = 1,
     col: u64 = 1,
 };
@@ -27,195 +27,6 @@ fn ParseResult(comptime T: type) type {
     };
 }
 
-fn ParseCombiner(comptime TArg0: type, comptime TArg1: type, comptime TRes: type) type {
-    return struct {
-        const Arg0Type = TArg0;
-        const Arg1Type = TArg1;
-        const ResType = TRes;
-        combine: *const fn (parser: *Parser, arg0: TArg0, arg1: TArg1) ParseError!TRes,
-    };
-}
-
-fn ParseOp(comptime TArg: type, comptime TRes: type) type {
-    return struct {
-        const ArgType = TArg;
-        const ResType = TRes;
-
-        func: switch (TArg) {
-            void => *const fn (*Parser) ParseResult(TRes),
-            else => *const fn (*Parser, TArg) ParseResult(TRes),
-        },
-        arg: TArg = undefined,
-
-        pub fn parse(self: @This(), parser: *Parser) ParseResult(TRes) {
-            return switch (TArg) {
-                void => self.func(parser),
-                else => self.func(parser, self.arg),
-            };
-        }
-
-        fn repeated(self: @This()) ParseOp(@TypeOf(self), []TRes) {
-            return ParseOp(@TypeOf(self), []TRes){
-                .func = struct {
-                    fn func(parser: *Parser, arg: TArg) ParseResult([]TRes) {
-                        var list = std.ArrayList(TRes).empty;
-                        while (true) {
-                            const elem = try arg.parse(parser);
-                            switch (elem) {
-                                .success => |value| try list.append(parser.allocator, value),
-                                .failure => break,
-                            }
-                        }
-                        return .{ .success = list.items };
-                    }
-                }.func,
-                .arg = self,
-            };
-        }
-
-        fn optional(self: @This()) ParseOp(@TypeOf(self), ?TRes) {
-            return ParseOp(@TypeOf(self), ?TRes){
-                .func = struct {
-                    fn func(parser: *Parser, arg: TArg) ParseResult(?TRes) {
-                        return .{
-                            .success = switch (try arg.parse(parser)) {
-                                .success => |value| value,
-                                .failure => null,
-                            },
-                        };
-                    }
-                }.func,
-                .arg = self,
-            };
-        }
-
-        fn TBoth(comptime TInner0: type, comptime TInner1: type) type {
-            return struct {
-                inner0: TInner0,
-                inner1: TInner1,
-            };
-        }
-
-        fn prefixed(self: @This(), other: anytype) ParseOp(
-            TBoth(
-                @TypeOf(other),
-                @TypeOf(self),
-            ),
-            TRes,
-        ) {
-            return ParseOp(TBoth(@TypeOf(other), @TypeOf(self)), TRes){
-                .func = struct {
-                    fn func(parser: *Parser, arg: TBoth(@TypeOf(other), @TypeOf(self))) ParseResult(TRes) {
-                        const result0 = try arg.inner0.parse(parser);
-                        return switch (result0) {
-                            .success => arg.inner1.parse(parser),
-                            .failure => |reason| .{ .failure = reason },
-                        };
-                    }
-                }.func,
-                .arg = .{
-                    .inner0 = other,
-                    .inner1 = self,
-                },
-            };
-        }
-
-        fn suffixed(self: @This(), other: anytype) ParseOp(
-            TBoth(
-                @TypeOf(self),
-                @TypeOf(other),
-            ),
-            TRes,
-        ) {
-            return ParseOp(TBoth(@TypeOf(self), @TypeOf(other)), TRes){
-                .func = struct {
-                    fn func(parser: *Parser, arg: TBoth(@TypeOf(self), @TypeOf(other))) ParseResult(TRes) {
-                        const result0 = try arg.inner0.parse(parser);
-                        return switch (result0) {
-                            .success => {
-                                const result1 = try arg.inner1.parse(parser);
-                                return switch (result1) {
-                                    .success => result0,
-                                    .failure => |reason| .{ .failure = reason },
-                                };
-                            },
-                            .failure => result0,
-                        };
-                    }
-                }.func,
-                .arg = .{
-                    .inner0 = self,
-                    .inner1 = other,
-                },
-            };
-        }
-
-        fn TOp(comptime TInner0: type, comptime TInner1: type, comptime TResComb: type) type {
-            return struct {
-                inner0: TInner0,
-                inner1: TInner1,
-                combiner: ParseCombiner(TInner0, TInner1, TResComb),
-            };
-        }
-
-        fn andThen(self: @This(), other: anytype, combiner: anytype) ParseOp(
-            TOp(
-                TRes,
-                other.ResType,
-                combiner.ResType,
-            ),
-            combiner.ResType,
-        ) {
-            return ParseOp(TOp(TRes, other.ResType, combiner.ResType), combiner.ResType){
-                .func = struct {
-                    fn func(parser: *Parser, arg: TOp(TRes, other.ResType, combiner.ResType)) ParseResult(combiner.ResType) {
-                        const result0 = try arg.inner0.parse(parser);
-                        return switch (result0) {
-                            .success => |value0| {
-                                const result1 = try arg.inner1.parse(parser);
-                                return switch (result1) {
-                                    .success => |value1| .{ .success = try arg.combiner(parser, value0, value1) },
-                                    .failure => |reason| .{ .failure = reason },
-                                };
-                            },
-                            .failure => |reason| .{ .failure = reason },
-                        };
-                    }
-                }.func,
-                .arg = .{
-                    .inner0 = self,
-                    .inner1 = other,
-                    .combiner = combiner,
-                },
-            };
-        }
-
-        fn listed(self: @This()) void {
-            const ws = ParseOp(usize, void){
-                .func = parseWhitespace,
-                .arg = 0,
-            };
-
-            var elem0 = self.suffixed(ws);
-
-            // const rep = elem.suffixed(ParseOp([]const [2]u8, []const u8){
-            //     .func = parseRange,
-            //     .arg = &[_][2]u8{.{ ',', ',' }},
-            // }).repeated();
-
-            //     const joined = rep.andThen(TRes, elem, []TRes, struct {
-            //         fn combiner(p: *Parser, a: []TRes, b: TRes) ParseError![]TRes {
-            //             const extended = try p.allocator.alloc(TRes, a.len + 1);
-            //             extended[a.len] = b;
-            //             return extended;
-            //         }
-            //     }.combiner);
-
-            return;
-        }
-    };
-}
-
 allocator: std.mem.Allocator,
 reader: std.Io.File.Reader,
 
@@ -224,20 +35,17 @@ buffer: std.ArrayList(u8) = .empty,
 
 fn save(self: *Parser) ParseError!void {
     const last = self.frames.getLastOrNull() orelse return error.NoMoreFrames;
-    try self.frames.append(self.allocator, .{
-        .start = self.reader.logicalPos(),
-        .line = last.line,
-        .col = last.col,
-    });
+    try self.frames.append(self.allocator, last);
 }
 
-fn restore(self: *Parser) ParseError!void {
-    const frame = self.frames.pop();
-    if (frame) |p| {
-        try self.reader.seekTo(p);
-    } else {
-        return error.NoMoreFrames;
-    }
+fn discard(self: *Parser) ParseError!void {
+    _ = self.frames.pop() orelse return error.NoMoreFrames;
+    try self.reader.seekTo((self.frames.getLastOrNull() orelse return error.NoMoreFrames).pos);
+}
+
+fn merge(self: *Parser) ParseError!void {
+    const last = self.frames.pop() orelse return error.NoMoreFrames;
+    self.frames.items[self.frames.items.len - 1].pos = last.pos;
 }
 
 fn parseChars(self: *Parser, dst: []u8) ParseError!void {
@@ -259,20 +67,18 @@ fn parseChars(self: *Parser, dst: []u8) ParseError!void {
     }
 
     // std.debug.print("line: {}, col: {}\n", .{ line, col });
-    last_ptr.start += dst.len;
+    last_ptr.pos += dst.len;
     last_ptr.line = line;
     last_ptr.col = col;
 }
 
-fn parseLiteral(self: *Parser, lit: []const u8) ParseResult(void) {
-    var buf: []u8 = self.allocator.alloc(u8, lit.len);
+fn parseLiteral(self: *Parser, comptime lit: []const u8) ParseResult(void) {
+    var buf: [lit.len]u8 = undefined;
     try parseChars(self, &buf);
     if (std.mem.eql(u8, &buf, lit)) {
         return .success;
     } else {
-        return .{
-            .failure = "Expected literal '" ++ lit ++ "'",
-        };
+        return .{ .failure = "Expected literal '" ++ lit ++ "'" };
     }
 }
 
@@ -307,22 +113,93 @@ fn parseName(self: *Parser) ParseResult([]const u8) {
     return .{ .success = try std.mem.concat(self.allocator, u8, &.{ first, rest }) };
 }
 
-fn parseWhitespace(self: *Parser, min_length: usize) ParseResult(void) {
+fn parseWhitespace(self: *Parser, comptime min_length: usize) ParseResult(void) {
     const ws = (try self.parseRange(&[_][2]u8{ .{ ' ', ' ' }, .{ '\t', '\t' }, .{ '\r', '\r' }, .{ '\n', '\n' } })).success;
     if (ws.len < min_length) {
-        return .{ .failure = "Failed to parse enough whitespace" };
+        return .{ .failure = "Failed to parse enough whitespace (" ++ std.fmt.comptimePrint("{}", .{min_length}) ++ ")" };
     }
     return .success;
+}
+
+fn OpResultType(op: anytype) type {
+    return @typeInfo(@TypeOf(op)).@"fn".return_type.?;
+}
+
+fn OpSuccessType(op: anytype) type {
+    return @typeInfo(@typeInfo(OpResultType(op)).error_union.payload).@"union".fields[0].type;
+}
+
+fn invoke(self: *Parser, op: anytype, arg: anytype) OpResultType(op) {
+    return switch (@typeInfo(@TypeOf(op)).@"fn".params.len) {
+        1 => op(self),
+        2 => op(self, arg),
+        else => @compileError("Can only handle 0-1 args for now."),
+    };
+}
+
+fn parseRepeated(self: *Parser, op: anytype, arg: anytype) ParseResult([]OpSuccessType(op)) {
+    var list = std.ArrayList(OpSuccessType(op)).empty;
+    while (true) {
+        try self.save();
+        const elem = try self.invoke(op, arg);
+        switch (elem) {
+            .success => |value| {
+                try self.merge();
+                try list.append(self.allocator, value);
+            },
+            .failure => {
+                try self.discard();
+                break;
+            },
+        }
+    }
+    return .{ .success = list.items };
+}
+
+fn parseOptional(self: *Parser, op: anytype, arg: anytype) ParseResult(?OpSuccessType(op)) {
+    self.save();
+    return switch (try self.invoke(op, arg)) {
+        .success => |value| blk: {
+            self.merge();
+            break :blk value;
+        },
+        .failure => blk: {
+            self.discard();
+            break :blk null;
+        },
+    };
+}
+
+fn parseItem(self: *Parser, op: anytype, arg: anytype) ParseResult(OpSuccessType(op)) {
+    const result = try self.invoke(op, arg);
+    switch (result) {
+        .success => {},
+        .failure => |value| return .{ .failure = value },
+    }
+    _ = try self.parseWhitespace(0);
+    switch (try self.parseLiteral(",")) {
+        .success => {},
+        .failure => |value| return .{ .failure = value },
+    }
+    _ = try self.parseWhitespace(0);
+    return result;
+}
+
+fn parseListed(self: *Parser, op: anytype, arg: anytype) ParseResult([]OpSuccessType(op)) {
+    _ = try self.parseWhitespace(0);
+    const result = self.parseRepeated(parseItem, arg);
+    switch (result) {
+        .success => {},
+        .failure => |value| return .{ .failure = value },
+    }
+    return result;
 }
 
 pub fn parseScript(self: *Parser) ParseResult(types.Script) {
     try self.frames.append(self.allocator, .{});
 
     outer: while (true) {
-        _ = try self.parseWhitespace(0);
-        const result = try (ParseOp(void, []const u8){
-            .func = parseName,
-        }).listed().parse(self);
+        const result = try self.parseListed(parseName, .{});
         switch (result) {
             .success => |value| {
                 for (value) |name| {
@@ -338,6 +215,11 @@ pub fn parseScript(self: *Parser) ParseResult(types.Script) {
                 );
                 break :outer;
             },
+        }
+        const ws = try self.parseWhitespace(1);
+        switch (ws) {
+            .success => {},
+            .failure => break,
         }
     }
 
