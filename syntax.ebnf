@@ -76,7 +76,8 @@ expr
     | unary_op, expr
     | primary, binary_op, expr
     | primary, "[", expr, "]"
-    | "fn", fn_sig, "{", fn_scope, "}";
+    | "fn", fn_sig, "{", fn_scope, "}"
+    | "(", generic_defn, ")";
 many_expr = { expr, "," }, [expr];
 
 var_decl = name, ":", generic_decl;
@@ -88,7 +89,16 @@ many_var_defn = { var_defn, "," }, [var_defn];
 fn_sig = "(", many_var_decl, ")", generic_decl;
 fn_defn = "fn", name, fn_sig, "{", fn_scope, "}";
 
-stmt = var_decl | var_defn | if_stmt | for_stmt | return_stmt | break_stmt | continue_stmt | yield_stmt | fn_call;
+stmt
+    = var_decl
+    | var_defn
+    | if_stmt
+    | for_stmt
+    | return_stmt
+    | break_stmt
+    | continue_stmt
+    | yield_stmt
+    | fn_call;
 fn_scope = { stmt };
 
 if_stmt = "if", [ var_defn, ";" ], expr, "{", fn_scope, "}", {"elif", expr, "{", fn_scope, "}"}, ["else", "{", fn_scope, "}"];

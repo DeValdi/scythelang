@@ -27,7 +27,7 @@ fn ParseResult(comptime T: type) type {
     };
 }
 
-allocator: std.mem.Allocator,
+gpa: std.mem.Allocator,
 reader: std.Io.File.Reader,
 
 frames: std.ArrayList(ParseFrame) = .empty,
@@ -35,7 +35,7 @@ buffer: std.ArrayList(u8) = .empty,
 
 fn save(self: *Parser) ParseError!void {
     const last = self.frames.getLastOrNull() orelse return error.NoMoreFrames;
-    try self.frames.append(self.allocator, last);
+    try self.frames.append(self.gpa, last);
 }
 
 fn discard(self: *Parser) ParseError!void {
@@ -82,8 +82,9 @@ fn parseLiteral(self: *Parser, comptime lit: []const u8) ParseResult(void) {
     }
 }
 
-fn parseRange(self: *Parser, range: []const [2]u8) ParseResult([]const u8) {
-    var buffer: std.ArrayList(u8) = .empty;
+fn parseRange(self: *Parser, range: []const [2]u8, comptime collect: bool) ParseResult(if (collect) []u8 else usize) {
+    var list = std.ArrayList(u8).empty;
+    var i: usize = 0;
     while (true) {
         var c: u8 = undefined;
         self.parseChars((&c)[0..1]) catch |err| switch (err) {
@@ -99,53 +100,53 @@ fn parseRange(self: *Parser, range: []const [2]u8) ParseResult([]const u8) {
             try self.reader.seekBy(-1);
             break;
         }
-        try buffer.append(self.allocator, c);
+        if (collect) {
+            try list.append(self.gpa, c);
+        } else {
+            i += 1;
+        }
     }
-    return .{ .success = buffer.items };
+    return .{ .success = if (collect) list.items else i };
 }
 
-fn parseName(self: *Parser) ParseResult([]const u8) {
-    const first = (try self.parseRange(&[_][2]u8{ .{ 'a', 'z' }, .{ 'A', 'Z' }, .{ '_', '_' } })).success;
-    if (first.len == 0) {
+fn parseName(self: *Parser) ParseResult([]u8) {
+    const head = try self.parseRange(&[_][2]u8{ .{ 'a', 'z' }, .{ 'A', 'Z' }, .{ '_', '_' } }, true);
+    switch (head) {
+        .success => {},
+        .failure => return head,
+    }
+    if (head.success.len == 0) {
         return .{ .failure = "Failed to parse name" };
     }
-    const rest = (try self.parseRange(&[_][2]u8{ .{ 'a', 'z' }, .{ 'A', 'Z' }, .{ '_', '_' }, .{ '0', '9' } })).success;
-    return .{ .success = try std.mem.concat(self.allocator, u8, &.{ first, rest }) };
+    const rest = try self.parseRange(&[_][2]u8{ .{ 'a', 'z' }, .{ 'A', 'Z' }, .{ '_', '_' }, .{ '0', '9' } }, true);
+    switch (rest) {
+        .success => {},
+        .failure => return rest,
+    }
+    return .{ .success = try std.mem.concat(self.gpa, u8, &.{ head.success, rest.success }) };
 }
 
 fn parseWhitespace(self: *Parser, comptime min_length: usize) ParseResult(void) {
-    const ws = (try self.parseRange(&[_][2]u8{ .{ ' ', ' ' }, .{ '\t', '\t' }, .{ '\r', '\r' }, .{ '\n', '\n' } })).success;
-    if (ws.len < min_length) {
+    const ws = (try self.parseRange(&[_][2]u8{ .{ ' ', ' ' }, .{ '\t', '\t' }, .{ '\r', '\r' }, .{ '\n', '\n' } }, false)).success;
+    if (ws < min_length) {
         return .{ .failure = "Failed to parse enough whitespace (" ++ std.fmt.comptimePrint("{}", .{min_length}) ++ ")" };
     }
     return .success;
 }
 
-fn OpResultType(op: anytype) type {
-    return @typeInfo(@TypeOf(op)).@"fn".return_type.?;
+fn invoke(self: *Parser, op: anytype, args: anytype, comptime T: type) ParseResult(T) {
+    return @call(.auto, op, .{self} ++ args);
 }
 
-fn OpSuccessType(op: anytype) type {
-    return @typeInfo(@typeInfo(OpResultType(op)).error_union.payload).@"union".fields[0].type;
-}
-
-fn invoke(self: *Parser, op: anytype, arg: anytype) OpResultType(op) {
-    return switch (@typeInfo(@TypeOf(op)).@"fn".params.len) {
-        1 => op(self),
-        2 => op(self, arg),
-        else => @compileError("Can only handle 0-1 args for now."),
-    };
-}
-
-fn parseRepeated(self: *Parser, op: anytype, arg: anytype) ParseResult([]OpSuccessType(op)) {
-    var list = std.ArrayList(OpSuccessType(op)).empty;
+fn parseRepeated(self: *Parser, op: anytype, args: anytype, comptime T: type) ParseResult([]T) {
+    var list = std.ArrayList(T).empty;
     while (true) {
         try self.save();
-        const elem = try self.invoke(op, arg);
+        const elem = try self.invoke(op, args, T);
         switch (elem) {
             .success => |value| {
                 try self.merge();
-                try list.append(self.allocator, value);
+                try list.append(self.gpa, value);
             },
             .failure => {
                 try self.discard();
@@ -156,9 +157,9 @@ fn parseRepeated(self: *Parser, op: anytype, arg: anytype) ParseResult([]OpSucce
     return .{ .success = list.items };
 }
 
-fn parseOptional(self: *Parser, op: anytype, arg: anytype) ParseResult(?OpSuccessType(op)) {
+fn parseOptional(self: *Parser, op: anytype, args: anytype, comptime T: type) ParseResult(?T) {
     self.save();
-    return switch (try self.invoke(op, arg)) {
+    return switch (try self.invoke(op, args)) {
         .success => |value| blk: {
             self.merge();
             break :blk value;
@@ -170,8 +171,8 @@ fn parseOptional(self: *Parser, op: anytype, arg: anytype) ParseResult(?OpSucces
     };
 }
 
-fn parseItem(self: *Parser, op: anytype, arg: anytype) ParseResult(OpSuccessType(op)) {
-    const result = try self.invoke(op, arg);
+fn parseItem(self: *Parser, op: anytype, args: anytype, comptime T: type) ParseResult(T) {
+    const result = try self.invoke(op, args, T);
     switch (result) {
         .success => {},
         .failure => |value| return .{ .failure = value },
@@ -185,9 +186,9 @@ fn parseItem(self: *Parser, op: anytype, arg: anytype) ParseResult(OpSuccessType
     return result;
 }
 
-fn parseListed(self: *Parser, op: anytype, arg: anytype) ParseResult([]OpSuccessType(op)) {
+fn parseListed(self: *Parser, op: anytype, args: anytype, comptime T: type) ParseResult([]T) {
     _ = try self.parseWhitespace(0);
-    const result = self.parseRepeated(parseItem, arg);
+    const result = try self.parseRepeated(parseItem, .{ op, args, T }, T);
     switch (result) {
         .success => {},
         .failure => |value| return .{ .failure = value },
@@ -196,16 +197,16 @@ fn parseListed(self: *Parser, op: anytype, arg: anytype) ParseResult([]OpSuccess
 }
 
 pub fn parseScript(self: *Parser) ParseResult(types.Script) {
-    try self.frames.append(self.allocator, .{});
+    try self.frames.append(self.gpa, .{});
 
     outer: while (true) {
-        const result = try self.parseListed(parseName, .{});
+        const result = try self.parseListed(parseName, .{}, []u8);
         switch (result) {
             .success => |value| {
-                for (value) |name| {
-                    std.debug.print("{s} ", .{name});
+                for (value) |n| {
+                    std.debug.print("|{s}", .{n});
                 }
-                std.debug.print("\n", .{});
+                std.debug.print("|\n", .{});
             },
             .failure => |failure| {
                 const last_frame = self.frames.getLastOrNull() orelse return error.NoMoreFrames;
