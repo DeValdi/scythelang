@@ -1,128 +1,196 @@
-abstract_syntax_tree
-    = { import_stmt },
-    { macro_defn
+abstract_syntax_tree = {ws}, [ top_item, { sep, top_item }, {ws} ];
+
+top_item
+    = import_stmt
+    | macro_defn
     | type_defn
     | alias_stmt
-    | var_decl
-    | fn_decl
+    | (["extern", ws, {ws}], var_decl) (* either a global variable or one provided by C *)
+    | ("extern", ws, {ws}, fn_decl) (* forward declarations not necessary, so technically all are extern *)
     | var_defn
-    | fn_defn }
-    , { export_stmt };
+    | fn_defn
+    | export_stmt;
 
 lower = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z";
 upper = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z";
 digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
-name = (lower | upper | "_"), { lower | upper | "_" | digit };
+keyword
+    = "true" | "false"
+    | "and" | "or" | "not"
+    | "fn"
+    | "extern"
+    | "import" | "export"
+    | "break" | "yield" | "continue"
+    | "struct" | "union" | "enum"
+    | "smacro" | "cmacro"
+    | "if" | "elif" | "else"
+    | "for"
+    | "return"
+    | "alias"
+    | "as"
+    | "unsigned"
+    | "char"
+    | "short"
+    | "int"
+    | "long"
+    | "float"
+    | "double"
+    | "void"
+    | "bool"
+    | "null";
 
-hex = digit | "A" | "B" | "C" | "D" | "E" | "F";
+rest = { lower | upper | digit | "_" };
+value_name = ((lower | "_"), rest) - keyword;
+type_name = upper, rest;
+const_name = upper, { upper | digit | "_" };
+
+hex = digit | "A" | "B" | "C" | "D" | "E" | "F"; (* no lowercase letters by design *)
 bin = "0" | "1";
 oct = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7";
 
-comp_args_decl = "<", many_var_decl, ">";
-comp_args_defn = "<", many_expr, ">";
+enc_char = ? any character permitted by the file encoding ?;
+one_byte_char = ? any character representable by one byte ?;
 
-generic_decl = name, [comp_args_decl];
-generic_defn = name, [comp_args_defn];
+nl = ? newline ?;
+comment = "$", { enc_char - "$" }, "$"; (* comments cannot contain $ for now *)
+sp = " " | ? tab ? | comment; (* whitespace without newline *)
+ws = sp | nl; (* all whitespace *)
+sep = { sp }, nl, { ws };
 
-int_lit = ["+" | "-"], ((digit, { digit }) | ("0x", hex, { hex }) | ("0b", bin, { bin }) | ("0o", oct, { oct })), ["u"], ["c" | "s" | "l" | "ll"];
-float_lit = ["+" | "-"], (digit, { digit }, ".", digit, { digit }, ["e", ["+" | "-"], digit, { digit }]), ("f" | "d");
-bool_lit = "true" | "false";
-array_lit = "{", { expr, "," }, [expr], "}";
-struct_lit = generic_defn, "{", many_var_defn, "}";
-union_lit = generic_defn, "{", var_defn, "}";
-enum_lit = name, ".", name;
-literal = int_lit | float_lit | bool_lit | array_lit | struct_lit | union_lit | enum_lit;
+comp_args_decl = "<", {ws}, type_name, { {ws}, ",", {ws}, type_name }, [{ws}, ","], {ws}, ">";
+comp_args_defn = "<", {ws}, type, { {ws}, "," , {ws}, type }, [{ws}, ","], {ws}, ">";
 
-struct_defn = "struct", generic_decl, "{", many_var_decl, "}";
-union_defn = "union", generic_decl, "{", many_var_decl, "}";
-enum_defn = "enum", generic_decl, [ "[", name, "]" ], "{", many_var_decl, "}";
+type_decl = type_name, [{ws}, comp_args_decl];
+type
+    = (["unsigned", ws, {ws}], ("char" | "short" | "int" | "long" | ("long", ws, {ws}, "long"))) | "float" | "double" | "void" | "bool"
+    | (type_name, [comp_args_defn])
+    | "*", {ws}, (type | value_name) (* pointer to element of <type> OR to a specific function, denoting a coroutine context to that function *)
+    | "[", {ws}, expr, {ws}, "]", {ws}, type (* array of <expr> elements of <type> *)
+    | "fn", {ws}, fn_sig; (* function type (not pointer!) *)
+
+int_lit = ((digit, {["_"], digit }) | ("0x", hex, {["_"], hex }) | ("0b", bin, {["_"], bin }) | ("0o", oct, {["_"], oct })), ["u"], ["c" | "s" | "l" | "ll"]; (* suffix determines type, so no "x: int = 1" necessary *)
+float_lit = (digit, {["_"], digit }, ".", digit, {["_"], digit }, ["e", ["+" | "-"], digit, {["_"], digit }]), ("f" | "d"); (* mandatory suffix by design *)
+bool_lit = "true" | "false"; (* enabled by C23 *)
+
+array_lit = "{", many_expr, "}"; (* trailing comma allowed *)
+struct_lit = type_name, [comp_args_defn], {ws}, "{", many_var_defn, "}"; (* trailing comma allowed *)
+union_lit = type_name, [comp_args_defn], {ws}, ".", {ws}, value_name, {ws}, "{", {ws}, expr, {ws}, "}"; (* only a single value can be set *)
+enum_lit = type_name, "::", const_name; (* namespaced *)
+
+backslash = ? single EBNF backslash, not properly displayed in VSCode, so defined like this ?;
+escape_seq = backslash, ( backslash | "n" | "r" | "t" | "0" | '"' | "'" );
+str_char = (enc_char - (backslash | '"')) | escape_seq;
+chr_char = (one_byte_char - (backslash | "'")) | escape_seq;
+string_lit = '"', { str_char }, '"';
+char_lit = "'", chr_char, "'";
+
+null_lit = "null"; (* enabled by C23; compiled to nullptr *)
+
+literal
+    = int_lit
+    | float_lit
+    | bool_lit
+    | array_lit
+    | struct_lit
+    | union_lit
+    | enum_lit
+    | string_lit
+    | char_lit
+    | null_lit;
+
+struct_defn = "struct", ws, {ws}, type_decl, {ws}, "{", many_var_decl, "}"; (* trailing comma allowed *)
+union_defn = "union", ws, {ws}, type_decl, {ws}, "{", many_var_decl, "}"; (* trailing comma allowed *)
+enum_defn = "enum", ws, {ws}, type_decl, {ws}, "{", { {ws}, const_name, [ {ws}, "=", {ws}, expr ], {ws}, "," }, [ {ws}, const_name, [ {ws}, "=", {ws}, expr ] ], {ws}, "}";
 type_defn = struct_defn | union_defn | enum_defn;
 
-alias_stmt = "alias", generic_decl, "=", generic_decl;
+alias_stmt = "alias", ws, {ws}, type_decl, {ws}, "=", {ws}, type; (* like C's typedef *)
 
-unary_op
-    = "~"
-    | "+"
-    | "-"
-    | "not"
-    | "&" | "*";
+(* binary operators all need at least one space between their arguments*)
+expr_0 = expr_1, { ws, {ws}, "or", ws, {ws}, expr_1 };
+expr_1 = expr_2, { ws, {ws}, "and", ws, {ws}, expr_2 };
+expr_2 = expr_3, { ws, {ws}, "|", ws, {ws}, expr_3 };
+expr_3 = expr_4, { ws, {ws}, "^", ws, {ws}, expr_4 };
+expr_4 = expr_5, { ws, {ws}, "&", ws, {ws}, expr_5 }; (* C precedence, so "a & b == c" means "a & (b == c)" on purpose *)
+expr_5 = expr_6, { ws, {ws}, ( "==" | "!=" ), ws, {ws}, expr_6 };
+expr_6 = expr_7, { ws, {ws}, ( "<" | "<=" | ">" | ">=" ), ws, {ws}, expr_7 }; 
+expr_7 = expr_8, { ws, {ws}, ( "<<" | ">>" ), ws, {ws}, expr_8 };
+expr_8 = expr_9, { ws, {ws}, ( "+" | "-" ), ws, {ws}, expr_9 };
+expr_9 = expr_10, { ws, {ws}, ( "*" | "/" | "%" ), ws, {ws}, expr_10 };
+expr_10 = expr_11, { ws, {ws}, "as", ws, {ws}, type }; (* cast *)
 
-binary_op
-    = "&"
-    | "^"
-    | "|"
-    | "*"
-    | "/"
-    | "%"
-    | "+"
-    | "-"
-    | "=="
-    | "!="
-    | "<"
-    | "<="
-    | ">"
-    | ">="
-    | "and"
-    | "or";
+(* unary operators may directly preceed their argument, except "not" *)
+expr_11 = { ("&" | "*" | ("not", ws) | "~" | "+" | "-" ), {ws}}, expr_12; (* C precedence, so "not a == b" means "(not a) == b" on purpose *)
 
+postfix
+    = ({ws}, ".", {ws}, value_name)
+    | ({sp}, "[", {ws}, expr, {ws}, "]")
+    | ({sp}, "(", many_expr, ")");
+expr_12 = primary, { postfix };
+
+fn_call = primary, { postfix }, {sp}, "(", many_expr, ")";
 primary
     = literal
-    | ("(", expr, ")")
-    | fn_call
-    | name, { ".", name };
+    | (value_name, [comp_args_defn])
+    | ("(", {ws}, expr, {ws}, ")")
+    | ("fn", {ws}, fn_sig, {ws}, "{", scope, "}");
 
-expr
-    = primary
-    | unary_op, expr
-    | primary, binary_op, expr
-    | primary, "[", expr, "]"
-    | "fn", fn_sig, "{", fn_scope, "}"
-    | "(", generic_defn, ")";
-many_expr = { expr, "," }, [expr];
+expr = expr_0;
+many_expr = {ws}, [ expr, { {ws}, ",", {ws}, expr }, [ {ws}, "," ], {ws} ]; (* trailing comma allowed *)
 
-var_decl = name, ":", generic_decl;
-many_var_decl = { var_decl, "," }, [var_decl];
+var_decl = value_name, {ws}, ":", {ws}, type;
+many_var_decl = {ws}, [ var_decl, { {ws}, ",", {ws}, var_decl }, [ {ws}, "," ], {ws} ]; (* trailing comma allowed *)
 
-var_defn = name, "=", expr;
-many_var_defn = { var_defn, "," }, [var_defn];
+var_defn = value_name, {ws}, "=", {ws}, expr;
+many_var_defn = {ws}, [ var_defn, { {ws}, ",", {ws}, var_defn }, [ {ws}, "," ], {ws} ]; (* trailing comma allowed *)
 
-fn_sig = "(", many_var_decl, ")", generic_decl;
-fn_defn = "fn", name, fn_sig, "{", fn_scope, "}";
+fn_sig = "(", {ws}, [ { var_decl, {ws}, ",", {ws} }, ( var_decl | "..." ), [ {ws}, "," ], {ws} ], ")", [{ws}, type]; (* empty parameter list / return value allowed; trailing comma allowed, even after ... *)
+fn_defn = "fn", ws, {ws}, value_name, [{ws}, comp_args_decl], {ws}, fn_sig, {ws}, "{", scope, "}";
 
 stmt
     = var_decl
-    | var_defn
+    | assign_stmt
     | if_stmt
     | for_stmt
     | return_stmt
     | break_stmt
     | continue_stmt
     | yield_stmt
-    | fn_call;
-fn_scope = { stmt };
+    | fn_call
+    | block_stmt;
+scope = {ws}, [ stmt, { sep, stmt }, {ws} ]; (* statements separated by newlines *)
 
-if_stmt = "if", [ var_defn, ";" ], expr, "{", fn_scope, "}", {"elif", expr, "{", fn_scope, "}"}, ["else", "{", fn_scope, "}"];
+assign_stmt = expr_11, {ws}, "=", {ws}, expr; (* scope lookup on the type decides whether a local variable or memory location is assigned to *)
 
-for_stmt = "for", var_defn, ";", expr, ";", stmt, "{", fn_scope, "}";
+if_stmt = "if", ws, {ws}, [var_defn, {ws}, ";", {ws}], expr, {ws}, "{", scope, "}" (* if-statement may declare a scope-local variable *)
+        , {{ws}, "elif", ws, {ws}, [var_defn, {ws}, ";", {ws}], expr, {ws}, "{", scope, "}"} (* so may elif *)
+        , [{ws},"else", [ws, {ws}, var_defn, {ws}, ";"], {ws}, "{", scope, "}"] (* so may else *); 
 
-return_stmt = "return", [expr];
+for_stmt = "for", ws, {ws}, var_defn, {ws}, ";", {ws}, expr, {ws}, ";", {ws}, stmt, {ws}, "{", scope, "}"; (* semicolons are mandatory; <stmt> can be ANY statement *)
 
-break_stmt = "break", [expr];
+return_stmt = "return", [sp, {sp}, expr]; (* return value may be omitted for void-returning function *)
 
-continue_stmt = "continue", [expr];
+break_stmt = "break", [sp, {sp}, expr]; (* accepts index for nested loops *)
 
-yield_stmt = "yield", [expr];
+continue_stmt = "continue", [sp, {sp}, expr]; (* accepts index for nested loops *)
 
-fn_call = name, [comp_args_defn], "(", many_expr, ")";
+yield_stmt = "yield", [sp, {sp}, expr]; (* yield value may be omitted for void-returning function *)
 
-macro_call = "!", name, "(", { any }, ")"; (* unused, since pre-/postparsed*)
+macro_arg 
+    = { (enc_char - ("(" | ")" | "," | backslash))
+    | (backslash, enc_char)
+    | ("(", macro_arg, { ",", macro_arg }, ")") };
+macro_call = "!", value_name, {ws}, "(", macro_arg, { ",", macro_arg }, ")"; (* unused, since pre- / postprocessed *)
 
-import_stmt = "import", name, { ".", name };
+import_stmt = "import", ws, {ws}, value_name, { ".", value_name }; (* path of file, separated by dots *)
 
-fn_decl = name, fn_sig;
+fn_decl = "fn", ws, {ws}, value_name, [{ws}, comp_args_decl], {ws}, fn_sig; (* only used for extern functions *)
 
-any = ? any text permitted by the encoding ?;
+block_stmt = "{", scope, "}"; (* block-local values, need checking in semantics *)
 
-macro_defn = ("smacro" | "cmacro"), name, "(", many_var_decl, ")", "{", any, "}";
+macro_body
+    = { (enc_char - ("{" | "}" | backslash))
+    | (backslash, enc_char)
+    | ("{", macro_body, "}") };
+macro_defn = ("smacro" | "cmacro"), ws, {ws}, value_name, {ws}, "(", many_var_decl, ")", {ws}, "{", macro_body, "}"; (* smacro used before transpilation, cmacro after transpilation; escape braces properly, even in string / char literals in a cmacro! *)
 
-export_stmt = "export", { name, "," }, [name];
+export_stmt = "export", ws, {ws}, (value_name | type_name), {{ws}, ",", {ws}, (value_name | type_name) }, [{ws}, ","]; (* export types, functions or variables to other Scythe files and C *)

@@ -10,8 +10,8 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
-    // const tests = b.addTest(.{
-    //     .root_module = b.createModule(.{ .root_source_file = b.path("src/main.zig"), .target = b.graph.host }),
-    // });
-    // b.step("test", "Run tests").dependOn(&b.addRunArtifact(tests).step);
+    const tests = b.addTest(.{
+        .root_module = b.createModule(.{ .root_source_file = b.path("src/main.zig"), .target = b.graph.host }),
+    });
+    b.step("test", "Run tests").dependOn(&b.addRunArtifact(tests).step);
 }

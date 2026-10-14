@@ -1,4 +1,4 @@
-pub const Script = struct {
+pub const SyntaxTree = struct {
     import_stmts: []ImportStmt,
     extern_stmts: []ExternStmt,
     body: []union(enum) {

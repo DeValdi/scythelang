@@ -18,3 +18,7 @@ pub fn main(init: std.process.Init) !void {
     var parser = Parser{ .gpa = gpa, .reader = file.reader(io, buffer[0..]) };
     _ = try parser.parseScript();
 }
+
+test "trivial pass" {
+    std.testing.expect(true);
+}
