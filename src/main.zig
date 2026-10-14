@@ -20,5 +20,5 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test "trivial pass" {
-    std.testing.expect(true);
+    try std.testing.expect(true);
 }

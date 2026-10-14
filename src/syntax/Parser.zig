@@ -196,7 +196,7 @@ fn parseListed(self: *Parser, op: anytype, args: anytype, comptime T: type) Pars
     return result;
 }
 
-pub fn parseScript(self: *Parser) ParseResult(types.Script) {
+pub fn parseScript(self: *Parser) ParseResult(types.AbstractSyntaxTree) {
     try self.frames.append(self.gpa, .{});
 
     outer: while (true) {

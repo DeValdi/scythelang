@@ -1,4 +1,4 @@
-pub const SyntaxTree = struct {
+pub const AbstractSyntaxTree = struct {
     import_stmts: []ImportStmt,
     extern_stmts: []ExternStmt,
     body: []union(enum) {
