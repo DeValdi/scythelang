@@ -191,6 +191,6 @@ macro_body
     = { (enc_char - ("{" | "}" | backslash))
     | (backslash, enc_char)
     | ("{", macro_body, "}") };
-macro_defn = ("smacro" | "cmacro"), ws, {ws}, value_name, {ws}, "(", many_var_decl, ")", {ws}, "{", macro_body, "}"; (* smacro used before transpilation, cmacro after transpilation; escape braces properly, even in string / char literals in a cmacro! *)
+macro_defn = ("smacro" | "cmacro"), ws, {ws}, value_name, {ws}, "(", {ws}, [ { value_name, {ws}, ",", {ws} }, ( value_name | "..." ), [ {ws}, "," ], {ws} ], ")", {ws}, "{", macro_body, "}"; (* smacro used before transpilation, cmacro after transpilation; escape braces properly, even in string / char literals in a cmacro! *)
 
 export_stmt = "export", ws, {ws}, (value_name | type_name), {{ws}, ",", {ws}, (value_name | type_name) }, [{ws}, ","]; (* export types, functions or variables to other Scythe files and C *)

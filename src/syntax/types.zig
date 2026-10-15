@@ -1,24 +1,34 @@
 pub const AbstractSyntaxTree = struct {
-    import_stmts: []ImportStmt,
-    extern_stmts: []ExternStmt,
-    body: []union(enum) {
-        macro_defn: MacroDefn,
-        type_defn: TypeDefn,
-        alias_stmt: AliasStmt,
-        var_decl: VarDecl,
-        var_defn: VarDefn,
-        fn_defn: FnDefn,
-    },
-    export_stmts: []ExportStmt,
+    items: []TopItem,
 };
 
 pub const AliasStmt = struct {
-    name: GenericDecl,
-    type: GenericDecl,
+    name: *TypeDecl,
+    type: *Type,
 };
 
 pub const ArrayLit = struct {
     values: []Expr,
+};
+
+pub const ArrayType = struct {
+    len: *Expr,
+    type: *Type,
+};
+
+pub const AssignStmt = struct {
+    target: *Expr,
+    value: *Expr,
+};
+
+pub const BinOp = struct {
+    op: []u8,
+    expr0: *Expr,
+    expr1: *Expr,
+};
+
+pub const BlockStmt = struct {
+    scope: *Scope,
 };
 
 pub const BoolLit = struct {
@@ -26,14 +36,36 @@ pub const BoolLit = struct {
 };
 
 pub const Branch = struct {
-    expr: Expr,
-    scope: FnScope,
+    var_defn: ?*VarDefn,
+    expr: *Expr,
+    scope: *Scope,
+};
+
+pub const BreakStmt = struct {
+    index: ?*Expr,
+};
+
+pub const Cast = struct {
+    expr: *Expr,
+    type: *Type,
+};
+
+pub const CharLit = struct {
+    value: []u8,
+};
+
+pub const ContinueStmt = struct {
+    index: ?*Expr,
+};
+
+pub const ElseBranch = struct {
+    var_defn: ?*VarDefn,
+    scope: *Scope,
 };
 
 pub const EnumDefn = struct {
-    tag: GenericDecl,
-    type: IntType,
-    members: []VarDecl,
+    tag: *TypeDecl,
+    members: []EnumMember,
 };
 
 pub const EnumLit = struct {
@@ -41,35 +73,23 @@ pub const EnumLit = struct {
     value: []u8,
 };
 
+pub const EnumMember = struct {
+    name: []u8,
+    value: ?*Expr,
+};
+
 pub const ExportStmt = struct {
     symbols: [][]u8,
 };
 
 pub const Expr = union(enum) {
-    primary: Primary,
-    expr: Expr,
-    un_op: struct {
-        op: []u8,
-        expr: Expr,
-    },
-    bin_op: struct {
-        op: []u8,
-        expr0: Expr,
-        expr1: Expr,
-    },
-    index: struct {
-        base: Expr,
-        offset: Expr,
-    },
-    lambda: struct {
-        sig: FnSig,
-        scope: FnScope,
-    },
-};
-
-pub const ExternStmt = struct {
-    name: []u8,
-    sig: FnSig,
+    primary: *Primary,
+    un_op: *UnOp,
+    bin_op: *BinOp,
+    cast: *Cast,
+    member: *Member,
+    index: *Index,
+    fn_call: *FnCall,
 };
 
 pub const FloatLit = struct {
@@ -81,51 +101,54 @@ pub const FloatLit = struct {
 };
 
 pub const FnCall = struct {
-    name: []u8,
-    comp_args: []Expr,
+    callee: *Expr, // compile-time arguments are part of the callee's ValueRef
     dynm_args: []Expr,
+};
+
+pub const FnDecl = struct {
+    name: []u8,
+    comp_args: [][]u8,
+    sig: *FnSig,
 };
 
 pub const FnDefn = struct {
     name: []u8,
-    sig: FnSig,
-    scope: FnScope,
-};
-
-pub const FnScope = union(enum) {
-    body: []union(enum) {
-        var_decl: VarDecl,
-        var_defn: VarDefn,
-        if_stmt: IfStmt,
-        loop_stmt: LoopStmt,
-        return_stmt: ReturnStmt,
-        fn_call: FnCall,
-    },
+    comp_args: [][]u8,
+    sig: *FnSig,
+    scope: *Scope,
 };
 
 pub const FnSig = struct {
     args: []VarDecl,
-    ret_type: GenericDecl,
+    variadic: bool,
+    ret_type: ?*Type,
 };
 
-pub const GenericDecl = struct {
-    name: []u8,
-    comp_args: []VarDecl,
+pub const ForStmt = struct {
+    var_defn: *VarDefn,
+    expr: *Expr,
+    stmt: *Stmt,
+    scope: *Scope,
 };
 
-pub const GenericDefn = struct {
-    name: []u8,
-    comp_args: []Expr,
+pub const GlobalVarDecl = struct {
+    is_extern: bool,
+    var_decl: *VarDecl,
 };
 
 pub const IfStmt = struct {
-    @"if": Branch,
+    @"if": *Branch,
     elif: []Branch,
-    @"else": ?Branch,
+    @"else": ?*ElseBranch,
 };
 
 pub const ImportStmt = struct {
     path: [][]u8,
+};
+
+pub const Index = struct {
+    base: *Expr,
+    offset: *Expr,
 };
 
 pub const IntLit = struct {
@@ -146,68 +169,158 @@ pub const IntType = enum {
     ulonglong,
 };
 
-pub const Literal = union(enum) {
-    int: IntLit,
-    float: FloatLit,
-    bool: BoolLit,
-    array: ArrayLit,
-    @"struct": StructLit,
-    @"union": UnionLit,
-    @"enum": EnumLit,
+pub const Lambda = struct {
+    sig: *FnSig,
+    scope: *Scope,
 };
 
-pub const LoopStmt = struct {
-    scope: FnScope,
+pub const Literal = union(enum) {
+    int: *IntLit,
+    float: *FloatLit,
+    bool: *BoolLit,
+    array: *ArrayLit,
+    @"struct": *StructLit,
+    @"union": *UnionLit,
+    @"enum": *EnumLit,
+    string: *StringLit,
+    char: *CharLit,
+    null: void,
 };
 
 pub const MacroDefn = struct {
+    kind: enum {
+        smacro,
+        cmacro,
+    },
     name: []u8,
-    args: []VarDecl,
+    args: [][]u8,
+    variadic: bool,
     body: []u8,
 };
 
+pub const Member = struct {
+    base: *Expr,
+    name: []u8,
+};
+
+pub const PointerType = union(enum) {
+    type: *Type,
+    @"fn": []u8, // coroutine context of the named function
+};
+
 pub const Primary = union(enum) {
-    literal: Literal,
-    fn_call: FnCall,
-    lvalue: []u8,
+    literal: *Literal,
+    value_ref: *ValueRef,
+    expr: *Expr, // parenthesized
+    lambda: *Lambda,
 };
 
 pub const ReturnStmt = struct {
-    value: ?Expr,
+    value: ?*Expr,
+};
+
+pub const Scope = struct {
+    stmts: []Stmt,
+};
+
+pub const Stmt = union(enum) {
+    var_decl: *VarDecl,
+    assign_stmt: *AssignStmt,
+    if_stmt: *IfStmt,
+    for_stmt: *ForStmt,
+    return_stmt: *ReturnStmt,
+    break_stmt: *BreakStmt,
+    continue_stmt: *ContinueStmt,
+    yield_stmt: *YieldStmt,
+    fn_call: *FnCall,
+    block_stmt: *BlockStmt,
+};
+
+pub const StringLit = struct {
+    value: []u8,
 };
 
 pub const StructDefn = struct {
-    tag: GenericDecl,
+    tag: *TypeDecl,
     members: []VarDecl,
 };
 
 pub const StructLit = struct {
-    tag: GenericDefn,
+    tag: *TypeRef,
     members: []VarDefn,
 };
 
+pub const TopItem = union(enum) {
+    import_stmt: *ImportStmt,
+    macro_defn: *MacroDefn,
+    type_defn: *TypeDefn,
+    alias_stmt: *AliasStmt,
+    var_decl: *GlobalVarDecl,
+    fn_decl: *FnDecl, // always extern
+    var_defn: *VarDefn,
+    fn_defn: *FnDefn,
+    export_stmt: *ExportStmt,
+};
+
+pub const Type = union(enum) {
+    int: IntType,
+    float: void,
+    double: void,
+    void: void,
+    bool: void,
+    named: *TypeRef,
+    pointer: *PointerType,
+    array: *ArrayType,
+    @"fn": *FnSig,
+};
+
+pub const TypeDecl = struct {
+    name: []u8,
+    comp_args: [][]u8,
+};
+
 pub const TypeDefn = union(enum) {
-    @"struct": StructDefn,
-    @"union": UnionDefn,
-    @"enum": EnumDefn,
+    @"struct": *StructDefn,
+    @"union": *UnionDefn,
+    @"enum": *EnumDefn,
+};
+
+pub const TypeRef = struct { // type_name, [comp_args_defn]
+    name: []u8,
+    comp_args: []Type,
 };
 
 pub const UnionDefn = struct {
-    tag: GenericDecl,
+    tag: *TypeDecl,
     members: []VarDecl,
 };
 
 pub const UnionLit = struct {
-    tag: GenericDefn,
-    member: VarDefn,
+    tag: *TypeRef,
+    member: []u8,
+    value: *Expr,
+};
+
+pub const UnOp = struct {
+    op: []u8,
+    expr: *Expr,
+};
+
+pub const ValueRef = struct { // value_name, [comp_args_defn]
+    name: []u8,
+    comp_args: []Type,
 };
 
 pub const VarDecl = struct {
     name: []u8,
-    type: GenericDecl,
+    type: *Type,
 };
 
 pub const VarDefn = struct {
     name: []u8,
-    type: GenericDecl,
+    value: *Expr,
+};
+
+pub const YieldStmt = struct {
+    value: ?*Expr,
 };
