@@ -16,7 +16,7 @@ pub fn main(init: std.process.Init) !void {
 
     var buffer: [4096]u8 = undefined;
     var parser = Parser{ .gpa = gpa, .reader = file.reader(io, buffer[0..]) };
-    _ = try parser.parseScript();
+    _ = try parser.parseAbstractSyntaxTree();
 }
 
 test "trivial pass" {

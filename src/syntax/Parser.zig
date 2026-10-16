@@ -72,13 +72,13 @@ fn parseChars(self: *Parser, dst: []u8) ParseError!void {
     last_ptr.col = col;
 }
 
-fn parseLiteral(self: *Parser, comptime lit: []const u8) ParseResult(void) {
-    var buf: [lit.len]u8 = undefined;
+fn parseText(self: *Parser, comptime text: []const u8) ParseResult(void) {
+    var buf: [text.len]u8 = undefined;
     try parseChars(self, &buf);
-    if (std.mem.eql(u8, &buf, lit)) {
+    if (std.mem.eql(u8, &buf, text)) {
         return .success;
     } else {
-        return .{ .failure = "Expected literal '" ++ lit ++ "'" };
+        return .{ .failure = "Expected '" ++ text ++ "'" };
     }
 }
 
@@ -196,33 +196,115 @@ fn parseListed(self: *Parser, op: anytype, args: anytype, comptime T: type) Pars
     return result;
 }
 
-pub fn parseScript(self: *Parser) ParseResult(types.AbstractSyntaxTree) {
+pub fn parseAbstractSyntaxTree(self: *Parser) ParseResult(types.AbstractSyntaxTree) {
     try self.frames.append(self.gpa, .{});
-
-    outer: while (true) {
-        const result = try self.parseListed(parseName, .{}, []u8);
-        switch (result) {
-            .success => |value| {
-                for (value) |n| {
-                    std.debug.print("|{s}", .{n});
-                }
-                std.debug.print("|\n", .{});
-            },
-            .failure => |failure| {
-                const last_frame = self.frames.getLastOrNull() orelse return error.NoMoreFrames;
-                std.debug.print(
-                    "Parse failure: {s} at line {}, column {}\n",
-                    .{ failure, last_frame.line, last_frame.col },
-                );
-                break :outer;
-            },
-        }
-        const ws = try self.parseWhitespace(1);
-        switch (ws) {
-            .success => {},
-            .failure => break,
-        }
-    }
-
-    return .{ .success = undefined };
+    return switch (self.parseLi)
 }
+
+fn parseAliasStmt(self: *Parser) ParseResult(types.AliasStmt) {}
+
+fn parseArrayLit(self: *Parser) ParseResult(types.ArrayLit) {}
+
+fn parseArrayType(self: *Parser) ParseResult(types.ArrayType) {}
+
+fn parseAssignStmt(self: *Parser) ParseResult(types.AssignStmt) {}
+
+fn parseBinOp(self: *Parser) ParseResult(types.BinOp) {}
+
+fn parseBlockStmt(self: *Parser) ParseResult(types.BlockStmt) {}
+
+fn parseBoolLit(self: *Parser) ParseResult(types.BoolLit) {}
+
+fn parseBranch(self: *Parser) ParseResult(types.Branch) {}
+
+fn parseBreakStmt(self: *Parser) ParseResult(types.BreakStmt) {}
+
+fn parseCast(self: *Parser) ParseResult(types.Cast) {}
+
+fn parseCharLit(self: *Parser) ParseResult(types.CharLit) {}
+
+fn parseContinueStmt(self: *Parser) ParseResult(types.ContinueStmt) {}
+
+fn parseElseBranch(self: *Parser) ParseResult(types.ElseBranch) {}
+
+fn parseEnumDefn(self: *Parser) ParseResult(types.EnumDefn) {}
+
+fn parseEnumLit(self: *Parser) ParseResult(types.EnumLit) {}
+
+fn parseEnumMember(self: *Parser) ParseResult(types.EnumMember) {}
+
+fn parseExportStmt(self: *Parser) ParseResult(types.ExportStmt) {}
+
+fn parseExpr(self: *Parser) ParseResult(types.Expr) {}
+
+fn parseFloatLit(self: *Parser) ParseResult(types.FloatLit) {}
+
+fn parseFnCall(self: *Parser) ParseResult(types.FnCall) {}
+
+fn parseFnDecl(self: *Parser) ParseResult(types.FnDecl) {}
+
+fn parseFnDefn(self: *Parser) ParseResult(types.FnDefn) {}
+
+fn parseFnSig(self: *Parser) ParseResult(types.FnSig) {}
+
+fn parseForStmt(self: *Parser) ParseResult(types.ForStmt) {}
+
+fn parseGlobalVarDecl(self: *Parser) ParseResult(types.GlobalVarDecl) {}
+
+fn parseIfStmt(self: *Parser) ParseResult(types.IfStmt) {}
+
+fn parseImportStmt(self: *Parser) ParseResult(types.ImportStmt) {}
+
+fn parseIndex(self: *Parser) ParseResult(types.Index) {}
+
+fn parseIntLit(self: *Parser) ParseResult(types.IntLit) {}
+
+fn parseIntType(self: *Parser) ParseResult(types.IntType) {}
+
+fn parseLambda(self: *Parser) ParseResult(types.Lambda) {}
+
+fn parseLiteral(self: *Parser) ParseResult(types.Literal) {}
+
+fn parseMacroDefn(self: *Parser) ParseResult(types.MacroDefn) {}
+
+fn parseMember(self: *Parser) ParseResult(types.Member) {}
+
+fn parsePointerType(self: *Parser) ParseResult(types.PointerType) {}
+
+fn parsePrimary(self: *Parser) ParseResult(types.Primary) {}
+
+fn parseReturnStmt(self: *Parser) ParseResult(types.ReturnStmt) {}
+
+fn parseScope(self: *Parser) ParseResult(types.Scope) {}
+
+fn parseStmt(self: *Parser) ParseResult(types.Stmt) {}
+
+fn parseStringLit(self: *Parser) ParseResult(types.StringLit) {}
+
+fn parseStructDefn(self: *Parser) ParseResult(types.StructDefn) {}
+
+fn parseStructLit(self: *Parser) ParseResult(types.StructLit) {}
+
+fn parseTopItem(self: *Parser) ParseResult(types.TopItem) {}
+
+fn parseType(self: *Parser) ParseResult(types.Type) {}
+
+fn parseTypeDecl(self: *Parser) ParseResult(types.TypeDecl) {}
+
+fn parseTypeDefn(self: *Parser) ParseResult(types.TypeDefn) {}
+
+fn parseTypeRef(self: *Parser) ParseResult(types.TypeRef) {}
+
+fn parseUnionDefn(self: *Parser) ParseResult(types.UnionDefn) {}
+
+fn parseUnionLit(self: *Parser) ParseResult(types.UnionLit) {}
+
+fn parseUnOp(self: *Parser) ParseResult(types.UnOp) {}
+
+fn parseValueRef(self: *Parser) ParseResult(types.ValueRef) {}
+
+fn parseVarDecl(self: *Parser) ParseResult(types.VarDecl) {}
+
+fn parseVarDefn(self: *Parser) ParseResult(types.VarDefn) {}
+
+fn parseYieldStmt(self: *Parser) ParseResult(types.YieldStmt) {}
