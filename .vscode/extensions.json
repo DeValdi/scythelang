@@ -1,6 +1,7 @@
 {
     "recommendations": [
         "ziglang.vscode-zig",
-        "igochkov.vscode-ebnf"
+        "igochkov.vscode-ebnf",
+        "llvm-vs-code-extensions.lldb-dap"
     ]
 }

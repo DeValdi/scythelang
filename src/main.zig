@@ -1,5 +1,6 @@
 const std = @import("std");
 const Parser = @import("syntax/Parser.zig");
+const util = @import("syntax/util.zig");
 
 pub fn main(init: std.process.Init) !void {
     std.debug.print("Hello World!\n", .{});
@@ -16,7 +17,12 @@ pub fn main(init: std.process.Init) !void {
 
     var buffer: [4096]u8 = undefined;
     var parser = Parser{ .gpa = gpa, .reader = file.reader(io, buffer[0..]) };
-    _ = try parser.parseAbstractSyntaxTree();
+
+    const ast = try parser.parseAbstractSyntaxTree();
+    switch (ast) {
+        .success => |value| util.dump(value),
+        .failure => |value| std.debug.print("{s}", .{value}),
+    }
 }
 
 test "trivial pass" {

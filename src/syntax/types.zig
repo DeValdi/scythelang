@@ -3,8 +3,8 @@ pub const AbstractSyntaxTree = struct {
 };
 
 pub const AliasStmt = struct {
-    name: *TypeDecl,
-    type: *Type,
+    name: TypeDecl,
+    type: Type,
 };
 
 pub const ArrayLit = struct {
@@ -17,8 +17,8 @@ pub const ArrayType = struct {
 };
 
 pub const AssignStmt = struct {
-    target: *Expr,
-    value: *Expr,
+    target: Expr,
+    value: Expr,
 };
 
 pub const BinOp = struct {
@@ -28,7 +28,7 @@ pub const BinOp = struct {
 };
 
 pub const BlockStmt = struct {
-    scope: *Scope,
+    scope: Scope,
 };
 
 pub const BoolLit = struct {
@@ -36,18 +36,18 @@ pub const BoolLit = struct {
 };
 
 pub const Branch = struct {
-    var_defn: ?*VarDefn,
-    expr: *Expr,
-    scope: *Scope,
+    var_defn: ?VarDefn,
+    expr: Expr,
+    scope: Scope,
 };
 
 pub const BreakStmt = struct {
-    index: ?*Expr,
+    index: ?Expr,
 };
 
 pub const Cast = struct {
     expr: *Expr,
-    type: *Type,
+    type: Type,
 };
 
 pub const CharLit = struct {
@@ -55,16 +55,16 @@ pub const CharLit = struct {
 };
 
 pub const ContinueStmt = struct {
-    index: ?*Expr,
+    index: ?Expr,
 };
 
 pub const ElseBranch = struct {
-    var_defn: ?*VarDefn,
-    scope: *Scope,
+    var_defn: ?VarDefn,
+    scope: Scope,
 };
 
 pub const EnumDefn = struct {
-    tag: *TypeDecl,
+    tag: TypeDecl,
     members: []EnumMember,
 };
 
@@ -75,7 +75,7 @@ pub const EnumLit = struct {
 
 pub const EnumMember = struct {
     name: []u8,
-    value: ?*Expr,
+    value: ?Expr,
 };
 
 pub const ExportStmt = struct {
@@ -83,13 +83,13 @@ pub const ExportStmt = struct {
 };
 
 pub const Expr = union(enum) {
-    primary: *Primary,
-    un_op: *UnOp,
-    bin_op: *BinOp,
-    cast: *Cast,
-    member: *Member,
-    index: *Index,
-    fn_call: *FnCall,
+    primary: Primary,
+    un_op: UnOp,
+    bin_op: BinOp,
+    cast: Cast,
+    member: Member,
+    index: Index,
+    fn_call: FnCall,
 };
 
 pub const FloatLit = struct {
@@ -108,14 +108,14 @@ pub const FnCall = struct {
 pub const FnDecl = struct {
     name: []u8,
     comp_args: [][]u8,
-    sig: *FnSig,
+    sig: FnSig,
 };
 
 pub const FnDefn = struct {
     name: []u8,
     comp_args: [][]u8,
-    sig: *FnSig,
-    scope: *Scope,
+    sig: FnSig,
+    scope: Scope,
 };
 
 pub const FnSig = struct {
@@ -125,21 +125,21 @@ pub const FnSig = struct {
 };
 
 pub const ForStmt = struct {
-    var_defn: *VarDefn,
-    expr: *Expr,
+    var_defn: VarDefn,
+    expr: Expr,
     stmt: *Stmt,
-    scope: *Scope,
+    scope: Scope,
 };
 
 pub const GlobalVarDecl = struct {
     is_extern: bool,
-    var_decl: *VarDecl,
+    var_decl: VarDecl,
 };
 
 pub const IfStmt = struct {
-    @"if": *Branch,
+    @"if": Branch,
     elif: []Branch,
-    @"else": ?*ElseBranch,
+    @"else": ?ElseBranch,
 };
 
 pub const ImportStmt = struct {
@@ -170,20 +170,20 @@ pub const IntType = enum {
 };
 
 pub const Lambda = struct {
-    sig: *FnSig,
-    scope: *Scope,
+    sig: FnSig,
+    scope: Scope,
 };
 
 pub const Literal = union(enum) {
-    int: *IntLit,
-    float: *FloatLit,
-    bool: *BoolLit,
-    array: *ArrayLit,
-    @"struct": *StructLit,
-    @"union": *UnionLit,
-    @"enum": *EnumLit,
-    string: *StringLit,
-    char: *CharLit,
+    int: IntLit,
+    float: FloatLit,
+    bool: BoolLit,
+    array: ArrayLit,
+    @"struct": StructLit,
+    @"union": UnionLit,
+    @"enum": EnumLit,
+    string: StringLit,
+    char: CharLit,
     null: void,
 };
 
@@ -209,14 +209,14 @@ pub const PointerType = union(enum) {
 };
 
 pub const Primary = union(enum) {
-    literal: *Literal,
-    value_ref: *ValueRef,
+    literal: Literal,
+    value_ref: ValueRef,
     expr: *Expr, // parenthesized
-    lambda: *Lambda,
+    lambda: Lambda,
 };
 
 pub const ReturnStmt = struct {
-    value: ?*Expr,
+    value: ?Expr,
 };
 
 pub const Scope = struct {
@@ -224,16 +224,16 @@ pub const Scope = struct {
 };
 
 pub const Stmt = union(enum) {
-    var_decl: *VarDecl,
-    assign_stmt: *AssignStmt,
-    if_stmt: *IfStmt,
-    for_stmt: *ForStmt,
-    return_stmt: *ReturnStmt,
-    break_stmt: *BreakStmt,
-    continue_stmt: *ContinueStmt,
-    yield_stmt: *YieldStmt,
-    fn_call: *FnCall,
-    block_stmt: *BlockStmt,
+    var_decl: VarDecl,
+    assign_stmt: AssignStmt,
+    if_stmt: IfStmt,
+    for_stmt: ForStmt,
+    return_stmt: ReturnStmt,
+    break_stmt: BreakStmt,
+    continue_stmt: ContinueStmt,
+    yield_stmt: YieldStmt,
+    fn_call: FnCall,
+    block_stmt: BlockStmt,
 };
 
 pub const StringLit = struct {
@@ -241,25 +241,25 @@ pub const StringLit = struct {
 };
 
 pub const StructDefn = struct {
-    tag: *TypeDecl,
+    tag: TypeDecl,
     members: []VarDecl,
 };
 
 pub const StructLit = struct {
-    tag: *TypeRef,
+    tag: TypeRef,
     members: []VarDefn,
 };
 
 pub const TopItem = union(enum) {
-    import_stmt: *ImportStmt,
-    macro_defn: *MacroDefn,
-    type_defn: *TypeDefn,
-    alias_stmt: *AliasStmt,
-    var_decl: *GlobalVarDecl,
-    fn_decl: *FnDecl, // always extern
-    var_defn: *VarDefn,
-    fn_defn: *FnDefn,
-    export_stmt: *ExportStmt,
+    import_stmt: ImportStmt,
+    macro_defn: MacroDefn,
+    type_defn: TypeDefn,
+    alias_stmt: AliasStmt,
+    var_decl: GlobalVarDecl,
+    fn_decl: FnDecl, // always extern
+    var_defn: VarDefn,
+    fn_defn: FnDefn,
+    export_stmt: ExportStmt,
 };
 
 pub const Type = union(enum) {
@@ -268,10 +268,10 @@ pub const Type = union(enum) {
     double: void,
     void: void,
     bool: void,
-    named: *TypeRef,
-    pointer: *PointerType,
-    array: *ArrayType,
-    @"fn": *FnSig,
+    named: TypeRef,
+    pointer: PointerType,
+    array: ArrayType,
+    @"fn": FnSig,
 };
 
 pub const TypeDecl = struct {
@@ -280,9 +280,9 @@ pub const TypeDecl = struct {
 };
 
 pub const TypeDefn = union(enum) {
-    @"struct": *StructDefn,
-    @"union": *UnionDefn,
-    @"enum": *EnumDefn,
+    @"struct": StructDefn,
+    @"union": UnionDefn,
+    @"enum": EnumDefn,
 };
 
 pub const TypeRef = struct { // type_name, [comp_args_defn]
@@ -291,12 +291,12 @@ pub const TypeRef = struct { // type_name, [comp_args_defn]
 };
 
 pub const UnionDefn = struct {
-    tag: *TypeDecl,
+    tag: TypeDecl,
     members: []VarDecl,
 };
 
 pub const UnionLit = struct {
-    tag: *TypeRef,
+    tag: TypeRef,
     member: []u8,
     value: *Expr,
 };
@@ -313,14 +313,14 @@ pub const ValueRef = struct { // value_name, [comp_args_defn]
 
 pub const VarDecl = struct {
     name: []u8,
-    type: *Type,
+    type: Type,
 };
 
 pub const VarDefn = struct {
     name: []u8,
-    value: *Expr,
+    value: Expr,
 };
 
 pub const YieldStmt = struct {
-    value: ?*Expr,
+    value: ?Expr,
 };
