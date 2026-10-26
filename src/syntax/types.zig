@@ -22,7 +22,7 @@ pub const AssignStmt = struct {
 };
 
 pub const BinOp = struct {
-    op: []u8,
+    op: []const u8,
     expr0: *Expr,
     expr1: *Expr,
 };
@@ -32,7 +32,7 @@ pub const BlockStmt = struct {
 };
 
 pub const BoolLit = struct {
-    value: []u8,
+    value: []const u8,
 };
 
 pub const Branch = struct {
@@ -51,7 +51,7 @@ pub const Cast = struct {
 };
 
 pub const CharLit = struct {
-    value: []u8,
+    value: []const u8,
 };
 
 pub const ContinueStmt = struct {
@@ -69,17 +69,17 @@ pub const EnumDefn = struct {
 };
 
 pub const EnumLit = struct {
-    namespace: []u8,
-    value: []u8,
+    namespace: []const u8,
+    value: []const u8,
 };
 
 pub const EnumMember = struct {
-    name: []u8,
+    name: []const u8,
     value: ?Expr,
 };
 
 pub const ExportStmt = struct {
-    symbols: [][]u8,
+    symbols: []const []const u8,
 };
 
 pub const Expr = union(enum) {
@@ -97,7 +97,7 @@ pub const FloatLit = struct {
         float,
         double,
     },
-    value: []u8,
+    value: []const u8,
 };
 
 pub const FnCall = struct {
@@ -106,14 +106,14 @@ pub const FnCall = struct {
 };
 
 pub const FnDecl = struct {
-    name: []u8,
-    comp_args: [][]u8,
+    name: []const u8,
+    comp_args: []const []const u8,
     sig: FnSig,
 };
 
 pub const FnDefn = struct {
-    name: []u8,
-    comp_args: [][]u8,
+    name: []const u8,
+    comp_args: []const []const u8,
     sig: FnSig,
     scope: Scope,
 };
@@ -143,7 +143,7 @@ pub const IfStmt = struct {
 };
 
 pub const ImportStmt = struct {
-    path: [][]u8,
+    path: []const []const u8,
 };
 
 pub const Index = struct {
@@ -153,7 +153,7 @@ pub const Index = struct {
 
 pub const IntLit = struct {
     type: IntType,
-    value: []u8,
+    value: []const u8,
 };
 
 pub const IntType = enum {
@@ -192,20 +192,20 @@ pub const MacroDefn = struct {
         smacro,
         cmacro,
     },
-    name: []u8,
-    args: [][]u8,
+    name: []const u8,
+    args: []const []const u8,
     variadic: bool,
-    body: []u8,
+    body: []const u8,
 };
 
 pub const Member = struct {
     base: *Expr,
-    name: []u8,
+    name: []const u8,
 };
 
 pub const PointerType = union(enum) {
     type: *Type,
-    @"fn": []u8, // coroutine context of the named function
+    @"fn": []const u8, // coroutine context of the named function
 };
 
 pub const Primary = union(enum) {
@@ -237,7 +237,7 @@ pub const Stmt = union(enum) {
 };
 
 pub const StringLit = struct {
-    value: []u8,
+    value: []const u8,
 };
 
 pub const StructDefn = struct {
@@ -275,8 +275,8 @@ pub const Type = union(enum) {
 };
 
 pub const TypeDecl = struct {
-    name: []u8,
-    comp_args: [][]u8,
+    name: []const u8,
+    comp_args: []const []const u8,
 };
 
 pub const TypeDefn = union(enum) {
@@ -286,7 +286,7 @@ pub const TypeDefn = union(enum) {
 };
 
 pub const TypeRef = struct { // type_name, [comp_args_defn]
-    name: []u8,
+    name: []const u8,
     comp_args: []Type,
 };
 
@@ -297,27 +297,27 @@ pub const UnionDefn = struct {
 
 pub const UnionLit = struct {
     tag: TypeRef,
-    member: []u8,
+    member: []const u8,
     value: *Expr,
 };
 
 pub const UnOp = struct {
-    op: []u8,
+    op: []const u8,
     expr: *Expr,
 };
 
 pub const ValueRef = struct { // value_name, [comp_args_defn]
-    name: []u8,
+    name: []const u8,
     comp_args: []Type,
 };
 
 pub const VarDecl = struct {
-    name: []u8,
+    name: []const u8,
     type: Type,
 };
 
 pub const VarDefn = struct {
-    name: []u8,
+    name: []const u8,
     value: Expr,
 };
 

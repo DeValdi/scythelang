@@ -3,22 +3,40 @@ const types = @import("types.zig");
 
 const Parser = @This();
 
-const ParseFrame = struct {
-    pos: u64 = 0,
-    line: u64 = 1,
-    col: u64 = 1,
-};
+// ---------------------------------------------------------------------------
+// Design
+//
+// The whole input is in memory (`source`), so the parser state is just one
+// integer: `pos`, the index of the next unread byte. Line and column are not
+// tracked while parsing; they are computed from `pos` only when an error is
+// reported (see lineCol()).
+//
+// Backtracking:
+//   const start = self.pos;   // remember
+//   ...
+//   self.pos = start;         // forget what was consumed
+//   There is no frame stack to keep balanced.
+//
+// Failure contract:
+//   A parse function that fails (returns false / null / `.failure`) leaves
+//   `pos` exactly where it found it, so any function can be used inside an
+//   optional or a repetition without cleanup.
+//
+// Ownership:
+//   Names and other text in the AST are slices of `source` (no copies), so
+//   the AST is only valid while `source` is alive. Slices that hold AST nodes
+//   (e.g. the list of top items, an import path) are allocated with `gpa` and
+//   owned by the caller. The same goes for the message of a `.failure` result
+//   of parseAbstractSyntaxTree().
+//
+// Error reporting:
+//   `.failure` carries a static message. To still be able to say *where*
+//   something went wrong, functions that have already committed to a rule
+//   (e.g. we saw `import`, so a name must follow) call noteFailure(), which
+//   remembers the failure that got furthest into the input.
+// ---------------------------------------------------------------------------
 
-const ParseError = error{
-    NoMoreFrames,
-    Canceled,
-    AccessDenied,
-    Unexpected,
-    EndOfStream,
-    Unseekable,
-    ReadFailed,
-    OutOfMemory,
-};
+const ParseError = error{OutOfMemory};
 
 fn ParseResult(comptime T: type) type {
     return ParseError!union(enum) {
@@ -27,151 +45,90 @@ fn ParseResult(comptime T: type) type {
     };
 }
 
+const ParseFailure = struct {
+    pos: usize,
+    msg: []const u8,
+};
+
 gpa: std.mem.Allocator,
-reader: std.Io.File.Reader,
+source: []const u8,
+pos: usize = 0,
+furthest: ?ParseFailure = null,
 
-frames: std.ArrayList(ParseFrame) = .empty,
-buffer: std.ArrayList(u8) = .empty,
-
-fn save(self: *Parser) ParseError!void {
-    const last = self.frames.getLastOrNull() orelse return error.NoMoreFrames;
-    try self.frames.append(self.gpa, last);
+pub fn init(gpa: std.mem.Allocator, source: []const u8) Parser {
+    return .{ .gpa = gpa, .source = source };
 }
 
-fn restore(self: *Parser) ParseError!void {
-    _ = self.frames.pop() orelse return error.NoMoreFrames;
-    try self.reader.seekTo((self.frames.getLastOrNull() orelse return error.NoMoreFrames).pos);
-}
-
-fn merge(self: *Parser) ParseError!void {
-    const last = self.frames.pop() orelse return error.NoMoreFrames;
-    self.frames.items[self.frames.items.len - 1] = last;
-}
-
-fn parseChars(self: *Parser, dst: []u8) ParseError!void {
-    try self.reader.interface.readSliceAll(dst);
-
-    const last_ptr = &self.frames.items[self.frames.items.len - 1];
-    var line = last_ptr.line;
-    var col = last_ptr.col;
-
-    for (dst) |c| {
-        switch (c) {
-            '\r' => {},
-            '\n' => {
-                line += 1;
-                col = 1;
-            },
-            else => col += 1,
-        }
+fn noteFailure(self: *Parser, msg: []const u8) void {
+    if (self.furthest) |f| {
+        if (self.pos <= f.pos) return;
     }
-
-    // std.debug.print("line: {}, col: {}\n", .{ line, col });
-    last_ptr.pos += dst.len;
-    last_ptr.line = line;
-    last_ptr.col = col;
+    self.furthest = .{ .pos = self.pos, .msg = msg };
 }
 
-fn parseText(self: *Parser, comptime text: []const u8) ParseResult(void) {
-    var buf: [text.len]u8 = undefined;
-    try self.save();
-    parseChars(self, &buf) catch |err| switch (err) {
-        error.EndOfStream => {
-            try self.restore();
-            return .{ .failure = "No '" ++ text ++ "'" };
+fn lineCol(self: *const Parser, pos: usize) struct { line: usize, col: usize } {
+    var line: usize = 1;
+    var col: usize = 1;
+    for (self.source[0..pos]) |c| switch (c) {
+        '\r' => {},
+        '\n' => {
+            line += 1;
+            col = 1;
         },
-        else => return err,
+        else => col += 1,
     };
-    if (std.mem.eql(u8, &buf, text)) {
-        try self.merge();
-        return .success;
-    } else {
-        try self.restore();
-        return .{ .failure = "No '" ++ text ++ "'" };
-    }
+    return .{ .line = line, .col = col };
 }
 
-fn parseRange(self: *Parser, range: []const [2]u8, comptime collect: bool, limit: ?usize) ParseError!(if (collect) []u8 else usize) {
-    var list = std.ArrayList(u8).empty;
-    var i: usize = 0;
-    while (limit == null or (i < limit.?)) {
-        try self.save();
-        var c: u8 = undefined;
-        self.parseChars((&c)[0..1]) catch |err| switch (err) {
-            error.EndOfStream => {
-                try self.restore();
-                break;
-            },
-            else => return err,
-        };
-        const matches = for (range) |r| {
-            if (c >= r[0] and c <= r[1]) {
-                break true;
+fn parseText(self: *Parser, comptime text: []const u8) bool {
+    if (!std.mem.startsWith(u8, self.source[self.pos..], text)) return false;
+    self.pos += text.len;
+    return true;
+}
+
+fn parseSp(self: *Parser) bool {
+    if (self.pos >= self.source.len) return false;
+    switch (self.source[self.pos]) {
+        ' ', '\t' => {
+            self.pos += 1;
+            return true;
+        },
+        '$' => {
+            const body = self.source[self.pos + 1 ..];
+            const end = std.mem.indexOfAny(u8, body, "$\r\n");
+            if (end == null or body[end.?] != '$') {
+                self.noteFailure("Unterminated comment (a comment must end with '$' on the same line)");
+                return false;
             }
-        } else false;
-        if (!matches) {
-            try self.restore();
-            break;
-        }
-        if (collect) {
-            try list.append(self.gpa, c);
-        }
-        try self.merge();
-        i += 1;
-    }
-    return if (collect) list.items else i;
-}
-
-fn parseSp(self: *Parser) ParseResult(void) {
-    if ((try self.parseRange(&[_][2]u8{ .{ ' ', ' ' }, .{ '\t', '\t' } }, false, 1)) == 1) return .success;
-
-    const dollar = &[_][2]u8{.{ '$', '$' }};
-
-    try self.save();
-
-    const comment_start = try self.parseRange(dollar, false, 1);
-    if (comment_start == 0) {
-        try self.restore();
-        return .{ .failure = "No space / tab / comment start" };
-    }
-
-    _ = try self.parseRange(&[_][2]u8{ .{ 0, '$' - 1 }, .{ '$' + 1, 255 } }, false, null);
-
-    const comment_end = try self.parseRange(dollar, false, 1);
-    if (comment_end == 0) {
-        try self.restore();
-        return .{ .failure = "No comment end" };
-    }
-
-    try self.merge();
-    return .success;
-}
-
-fn parseNl(self: *Parser) ParseResult(void) {
-    return switch (try self.parseRange(&[_][2]u8{ .{ '\r', '\r' }, .{ '\n', '\n' } }, false, 1)) {
-        1 => .success,
-        else => .{ .failure = "No newline" },
-    };
-}
-
-fn parseWs(self: *Parser) ParseResult(void) {
-    return switch (try self.parseSp()) {
-        .success => .success,
-        .failure => switch (try self.parseNl()) {
-            .success => .success,
-            .failure => .{ .failure = "No space / newline" },
+            self.pos += end.? + 2;
+            return true;
         },
-    };
+        else => return false,
+    }
 }
 
-fn parseSep(self: *Parser) ParseResult(void) {
-    while (true) if ((try self.parseWs()) == .failure) break;
+fn parseNl(self: *Parser) bool {
+    return self.parseText("\n") or self.parseText("\r\n");
+}
 
-    if ((try self.parseNl()) == .failure) return .{ .failure = "No newline in separator" };
+fn parseWs(self: *Parser) bool {
+    return self.parseSp() or self.parseNl();
+}
 
-    while (true) if ((try self.parseWs()) == .failure) break;
+fn skipWs(self: *Parser) void {
+    while (self.parseWs()) {}
+}
 
-    return .success;
+fn parseSep(self: *Parser) bool {
+    const start = self.pos;
+    while (self.parseSp()) {}
+    if (!self.parseNl()) {
+        self.noteFailure("Expected a newline between top-level items");
+        self.pos = start;
+        return false;
+    }
+    self.skipWs();
+    return true;
 }
 
 const keywords = [_][]const u8{
@@ -211,124 +168,101 @@ const keywords = [_][]const u8{
     "null",
 };
 
-fn parseValueName(self: *Parser) ParseResult([]u8) {
-    const head = try self.parseRange(&[_][2]u8{ .{ 'a', 'z' }, .{ '_', '_' } }, true, 1);
-    if (head.len == 0) return .{ .failure = "No value name start" };
-
-    const rest = try self.parseRange(&[_][2]u8{ .{ 'a', 'z' }, .{ 'A', 'Z' }, .{ '_', '_' }, .{ '0', '9' } }, true, null);
-
-    const combined = try std.mem.concat(self.gpa, u8, &.{ head, rest });
-    for (keywords) |kw| {
-        if (std.mem.eql(u8, kw, combined)) return .{ .failure = "No non-keyword value name" };
+fn parseValueName(self: *Parser) ?[]const u8 {
+    const src = self.source;
+    const start = self.pos;
+    if (start >= src.len) return null;
+    switch (src[start]) {
+        'a'...'z', '_' => {},
+        else => return null,
     }
 
-    return .{ .success = combined };
-}
-
-// fn invoke(self: *Parser, op: anytype, args: anytype, comptime T: type) ParseResult(T) {
-//     return @call(.auto, op, .{self} ++ args);
-// }
-
-// fn parseRepeated(self: *Parser, op: anytype, args: anytype, comptime T: type) ParseResult([]T) {
-//     var list = std.ArrayList(T).empty;
-//     while (true) {
-//         try self.save();
-//         const elem = try self.invoke(op, args, T);
-//         switch (elem) {
-//             .success => |value| {
-//                 try self.merge();
-//                 try list.append(self.gpa, value);
-//             },
-//             .failure => {
-//                 try self.discard();
-//                 break;
-//             },
-//         }
-//     }
-//     return .{ .success = list.items };
-// }
-
-// fn parseOptional(self: *Parser, op: anytype, args: anytype, comptime T: type) ParseResult(?T) {
-//     self.save();
-//     return switch (try self.invoke(op, args)) {
-//         .success => |value| blk: {
-//             self.merge();
-//             break :blk value;
-//         },
-//         .failure => blk: {
-//             self.discard();
-//             break :blk null;
-//         },
-//     };
-// }
-
-// fn parseItem(self: *Parser, op: anytype, args: anytype, comptime T: type) ParseResult(T) {
-//     const result = try self.invoke(op, args, T);
-//     if (result == .failure) {
-//         return .{ .failure = result.failure };
-//     }
-//     _ = try self.parseWhitespace(0);
-//     const comma = try self.parseLiteral(",");
-//     if (comma == .failure) {
-//         return .{ .failure = comma.failure };
-//     }
-//     _ = try self.parseWhitespace(0);
-//     return result;
-// }
-
-// fn parseListed(self: *Parser, op: anytype, args: anytype, comptime T: type) ParseResult([]T) {
-//     _ = try self.parseWhitespace(0);
-//     const result = try self.parseRepeated(parseItem, .{ op, args, T }, T);
-//     if (result == .failure) {
-//         return .{ .failure = result.failure };
-//     }
-//     return result;
-// }
-
-fn parseUnion(self: *Parser, comptime T: type, comptime fns: []const *const anyopaque) ParseResult(T) {
-    const ti = @typeInfo(T);
-    if (ti != .@"union") @compileError("Not a union");
-
-    inline for (0..fns.len) |i| {
-        try self.save();
-        const field = ti.@"union".fields[i];
-        const @"fn": *const fn (*Parser) ParseResult(field.type) = @ptrCast(fns[i]);
-        switch (try @"fn"(self)) {
-            .success => |value| {
-                try self.merge();
-                return .{ .success = @unionInit(T, field.name, value) };
-            },
-            .failure => {
-                try self.restore();
-            },
+    var end = start + 1;
+    while (end < src.len) : (end += 1) {
+        switch (src[end]) {
+            'a'...'z', 'A'...'Z', '0'...'9', '_' => {},
+            else => break,
         }
     }
-    return .{ .failure = "No match for union type " ++ @typeName(T) };
+
+    const name = src[start..end];
+    for (keywords) |kw| {
+        if (std.mem.eql(u8, kw, name)) return null;
+    }
+    self.pos = end;
+    return name;
+}
+
+fn parseUnion(self: *Parser, comptime T: type, comptime alternatives: anytype) ParseResult(T) {
+    if (@typeInfo(T) != .@"union") @compileError("Not a union");
+
+    const start = self.pos;
+    inline for (alternatives) |alt| {
+        const name = alt[0];
+        const f = alt[1];
+        if (@typeInfo(@TypeOf(f)).@"fn".return_type.? != ParseResult(@FieldType(T, name)))
+            @compileError("Parse function for '" ++ name ++ "' does not return ParseResult of the field's type");
+
+        switch (try f(self)) {
+            .success => |value| return .{ .success = @unionInit(T, name, value) },
+            .failure => self.pos = start, // superfluous
+        }
+    }
+
+    const msg = "No match for union type " ++ @typeName(T);
+    self.noteFailure(msg);
+    return .{ .failure = msg };
+}
+
+fn describeFailure(self: *Parser) ParseError![]const u8 {
+    var at = self.pos;
+    var msg: []const u8 = "Unexpected input";
+    if (self.furthest) |f| {
+        if (f.pos >= self.pos) {
+            at = f.pos;
+            msg = f.msg;
+        }
+    }
+    const lc = self.lineCol(at);
+    return std.fmt.allocPrint(self.gpa, "line {d}, column {d}: {s}", .{ lc.line, lc.col, msg });
+}
+
+fn discardItems(self: *Parser, items: *std.ArrayList(types.TopItem)) void {
+    for (items.items) |item| switch (item) {
+        .import_stmt => |imp| self.gpa.free(imp.path),
+        else => {},
+    };
+    items.deinit(self.gpa);
 }
 
 pub fn parseAbstractSyntaxTree(self: *Parser) ParseResult(types.AbstractSyntaxTree) {
-    try self.frames.append(self.gpa, .{});
-
-    while (true) if ((try self.parseWs()) == .failure) break;
+    self.pos = 0;
+    self.furthest = null;
 
     var items = std.ArrayList(types.TopItem).empty;
+    errdefer self.discardItems(&items);
 
-    var item = try self.parseTopItem();
-    if (item == .failure) return .{ .success = .{ .items = items.items } };
-    try items.append(self.gpa, item.success);
+    self.skipWs();
 
+    var first = true;
     while (true) {
-        while (true) if ((try self.parseSep()) == .failure) break;
-
-        item = try self.parseTopItem();
+        if (!first and !self.parseSep()) break;
+        try items.ensureUnusedCapacity(self.gpa, 1);
+        const item = try self.parseTopItem();
         if (item == .failure) break;
-        try items.append(self.gpa, item.success);
+        items.appendAssumeCapacity(item.success);
+        first = false;
     }
 
-    while (true) if ((try self.parseWs()) == .failure) break;
+    self.skipWs();
 
-    std.debug.assert(self.frames.items.len == 1);
-    return .{ .success = .{ .items = items.items } };
+    if (self.pos != self.source.len) {
+        const msg = try self.describeFailure();
+        self.discardItems(&items);
+        return .{ .failure = msg };
+    }
+
+    return .{ .success = .{ .items = try items.toOwnedSlice(self.gpa) } };
 }
 
 fn parseAliasStmt(self: *Parser) ParseResult(types.AliasStmt) {
@@ -437,29 +371,40 @@ fn parseIfStmt(self: *Parser) ParseResult(types.IfStmt) {
 
 fn parseImportStmt(self: *Parser) ParseResult(types.ImportStmt) {
     // "import", ws, {ws}, value_name, { ".", value_name }
-    if ((try self.parseText("import")) == .failure) return .{ .failure = "No import keyword" };
-    if ((try self.parseWs()) == .failure) return .{ .failure = "No whitespace" };
-    while (true) if ((try self.parseWs()) == .failure) break;
-    const first = try self.parseValueName();
-    if (first == .failure) return .{ .failure = "No path root" };
-    // std.debug.print("{s}\n", .{first.success});
+    // ws includes newlines, so the path may start on a later line than `import`.
+    const start = self.pos;
 
-    var path = std.ArrayList([]u8).empty;
-    try path.append(self.gpa, first.success);
+    if (!self.parseText("import")) return .{ .failure = "No import keyword" };
 
-    while (true) {
-        if ((try self.parseText(".")) == .failure) break;
-        const elem = try self.parseValueName();
-        if (elem == .failure) return .{ .failure = "No path element" };
-        // std.debug.print("{s}\n", .{elem.success});
-        try path.append(self.gpa, elem.success);
+    // From here on we have seen `import`, so anything wrong is worth reporting.
+    if (!self.parseWs()) {
+        self.noteFailure("Expected whitespace after 'import'");
+        self.pos = start;
+        return .{ .failure = "No whitespace after 'import'" };
+    }
+    self.skipWs();
+
+    var path = std.ArrayList([]const u8).empty;
+    errdefer path.deinit(self.gpa);
+
+    const first = self.parseValueName() orelse {
+        self.noteFailure("Expected a module name after 'import'");
+        self.pos = start;
+        return .{ .failure = "No path root" };
+    };
+    try path.append(self.gpa, first);
+
+    while (self.parseText(".")) {
+        const elem = self.parseValueName() orelse {
+            self.noteFailure("Expected a name after '.' in import path");
+            self.pos = start;
+            path.deinit(self.gpa);
+            return .{ .failure = "No path element" };
+        };
+        try path.append(self.gpa, elem);
     }
 
-    for (path.items, 0..) |elem, i| {
-        std.debug.print("path[{d}] = '{s}'\n", .{ i, elem });
-    }
-
-    return .{ .success = .{ .path = path.items } };
+    return .{ .success = .{ .path = try path.toOwnedSlice(self.gpa) } };
 }
 
 fn parseIndex(self: *Parser) ParseResult(types.Index) {
@@ -523,7 +468,9 @@ fn parseStructLit(self: *Parser) ParseResult(types.StructLit) {
 }
 
 fn parseTopItem(self: *Parser) ParseResult(types.TopItem) {
-    return try self.parseUnion(types.TopItem, &.{parseImportStmt});
+    return try self.parseUnion(types.TopItem, .{
+        .{ "import_stmt", parseImportStmt },
+    });
 }
 
 fn parseType(self: *Parser) ParseResult(types.Type) {
@@ -568,4 +515,228 @@ fn parseVarDefn(self: *Parser) ParseResult(types.VarDefn) {
 
 fn parseYieldStmt(self: *Parser) ParseResult(types.YieldStmt) {
     _ = self;
+}
+
+// ---------------------------------------------------------------------------
+// Tests. They run under std.testing.allocator, so any leak (or double free)
+// on a success path *or* a failure path fails the test.
+// ---------------------------------------------------------------------------
+
+/// Parses `source` and returns every top item's import path joined with '.'
+/// (caller frees each string and the slice), or the error message (caller frees).
+const Outcome = union(enum) {
+    ok: []const []const u8,
+    err: []const u8,
+};
+
+fn parseSource(source: []const u8) !Outcome {
+    const gpa = std.testing.allocator;
+    var parser = Parser.init(gpa, source);
+
+    switch (try parser.parseAbstractSyntaxTree()) {
+        .success => |ast| {
+            defer gpa.free(ast.items);
+            var out = std.ArrayList([]const u8).empty;
+            errdefer {
+                for (out.items) |p| gpa.free(p);
+                out.deinit(gpa);
+            }
+            for (ast.items) |item| {
+                const path = item.import_stmt.path;
+                defer gpa.free(path);
+                try out.append(gpa, try std.mem.join(gpa, ".", path));
+            }
+            return .{ .ok = try out.toOwnedSlice(gpa) };
+        },
+        .failure => |msg| return .{ .err = msg },
+    }
+}
+
+fn expectOk(source: []const u8, expected: []const []const u8) !void {
+    switch (try parseSource(source)) {
+        .ok => |paths| {
+            defer {
+                for (paths) |p| std.testing.allocator.free(p);
+                std.testing.allocator.free(paths);
+            }
+            try std.testing.expectEqual(expected.len, paths.len);
+            for (expected, paths) |e, a| try std.testing.expectEqualStrings(e, a);
+        },
+        .err => |msg| {
+            defer std.testing.allocator.free(msg);
+            std.debug.print("unexpected error: {s}\n", .{msg});
+            return error.TestUnexpectedResult;
+        },
+    }
+}
+
+fn expectErr(source: []const u8, expected: []const u8) !void {
+    switch (try parseSource(source)) {
+        .ok => |paths| {
+            for (paths) |p| std.testing.allocator.free(p);
+            std.testing.allocator.free(paths);
+            return error.TestUnexpectedResult;
+        },
+        .err => |msg| {
+            defer std.testing.allocator.free(msg);
+            try std.testing.expectEqualStrings(expected, msg);
+        },
+    }
+}
+
+const no_match = "No match for union type " ++ @typeName(types.TopItem);
+
+test "empty and whitespace-only input" {
+    try expectOk("", &.{});
+    try expectOk("  \n\t\n $comment$ \n", &.{});
+}
+
+test "imports: single, dotted, several" {
+    try expectOk("import a", &.{"a"});
+    try expectOk("import a.b.c\n", &.{"a.b.c"});
+    try expectOk("import a.b\nimport c\n", &.{ "a.b", "c" });
+}
+
+test "imports: whitespace, comments, blank lines, CRLF" {
+    try expectOk("import   a", &.{"a"});
+    try expectOk("import $c$ a", &.{"a"});
+    try expectOk("import a $x$\n\n   import b.c  \n", &.{ "a", "b.c" });
+    try expectOk("import a.b\r\nimport c\r\n", &.{ "a.b", "c" });
+    try expectOk("import _x1.y_2", &.{"_x1.y_2"});
+}
+
+test "newlines inside an import are whitespace" {
+    try expectOk("import\n  a.b", &.{"a.b"});
+    try expectOk("import \r\n\r\n\ta", &.{"a"});
+    try expectOk("import\n$c$\n a\nimport b", &.{ "a", "b" });
+    // ...but the dots of the path allow no whitespace at all.
+    try expectErr("import a\n.b\n", "line 2, column 1: " ++ no_match);
+    try expectErr("import a .b\n", "line 1, column 10: Expected a newline between top-level items");
+}
+
+test "comments are single-line" {
+    try expectOk("$one$ import a", &.{"a"});
+    try expectOk("import $c$ a", &.{"a"});
+    try expectOk("import $$ a", &.{"a"}); // an empty comment is fine
+    try expectOk("import a $c$\nimport b", &.{ "a", "b" });
+    try expectOk("import a $c$\r\n$d$\r\nimport b", &.{ "a", "b" });
+    try expectOk("import a $é — ünïcode, and more$\nimport b", &.{ "a", "b" });
+    // Error positions after a comment are still right.
+    try expectErr("import a\n$c$ foo", "line 2, column 5: " ++ no_match);
+}
+
+test "a comment cannot span lines" {
+    const msg = "Unterminated comment (a comment must end with '$' on the same line)";
+    try expectErr("$one\ntwo$ import a", "line 1, column 1: " ++ msg);
+    try expectErr("import $one\ntwo$ a", "line 1, column 8: " ++ msg);
+    try expectErr("import a $multi\nline$\nimport b", "line 1, column 10: " ++ msg);
+    try expectErr("import a $c\r\nd$\nimport b", "line 1, column 10: " ++ msg);
+    // A lone '\r' is a line break character too.
+    try expectErr("$a\rb$", "line 1, column 1: " ++ msg);
+}
+
+test "unterminated comment" {
+    const msg = "Unterminated comment (a comment must end with '$' on the same line)";
+    try expectErr("import a $oops\n", "line 1, column 10: " ++ msg);
+    try expectErr("import a $oops", "line 1, column 10: " ++ msg);
+    try expectErr("$", "line 1, column 1: " ++ msg);
+    try expectErr("import $x\n a", "line 1, column 8: " ++ msg);
+}
+
+test "separator: newline, then any amount of whitespace" {
+    try expectOk("import a\nimport b", &.{ "a", "b" });
+    try expectOk("import a   $c$   \n   import b", &.{ "a", "b" });
+    try expectOk("import a\n\n\n  $c$\n\t\nimport b", &.{ "a", "b" }); // blank lines and comment-only lines
+    try expectErr("import a   $c$   import b", "line 1, column 18: Expected a newline between top-level items");
+}
+
+test "items must be separated by a newline" {
+    try expectErr("import a import b\n", "line 1, column 10: Expected a newline between top-level items");
+    try expectErr("import a\rimport b\n", "line 1, column 9: Expected a newline between top-level items");
+}
+
+test "trailing garbage is an error with a position" {
+    try expectErr("foo bar", "line 1, column 1: " ++ no_match);
+    try expectErr("import a\nbogus\n", "line 2, column 1: " ++ no_match);
+}
+
+test "malformed imports are reported" {
+    try expectErr("import", "line 1, column 7: Expected whitespace after 'import'");
+    try expectErr("important\n", "line 1, column 7: Expected whitespace after 'import'");
+    // `ws` includes newlines, so the name may be on the next line.
+    try expectErr("import \n", "line 2, column 1: Expected a module name after 'import'");
+    try expectErr("import fn\n", "line 1, column 8: Expected a module name after 'import'");
+    try expectErr("import a.\n", "line 1, column 10: Expected a name after '.' in import path");
+    try expectErr("import a. b\n", "line 1, column 10: Expected a name after '.' in import path");
+    try expectErr("import A\n", "line 1, column 8: Expected a module name after 'import'");
+}
+
+test "keyword names are not value names" {
+    try expectOk("import fnx", &.{"fnx"});
+    try expectOk("import int_", &.{"int_"});
+    try expectErr("import import\n", "line 1, column 8: Expected a module name after 'import'");
+}
+
+test "bytes outside ASCII outside of comments are rejected, not crashed on" {
+    try expectErr("import \xff\n", "line 1, column 8: Expected a module name after 'import'");
+    try expectErr("\x00", "line 1, column 1: " ++ no_match);
+}
+
+test "names are slices of the input, not copies" {
+    const source = "import abc.def";
+    var parser = Parser.init(std.testing.allocator, source);
+    const ast = (try parser.parseAbstractSyntaxTree()).success;
+    defer std.testing.allocator.free(ast.items);
+    const path = ast.items[0].import_stmt.path;
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqual(source.ptr + 7, path[0].ptr);
+    try std.testing.expectEqual(source.ptr + 11, path[1].ptr);
+}
+
+test "a parser can be reused" {
+    var parser = Parser.init(std.testing.allocator, "import a\nimport b");
+    for (0..2) |_| {
+        const ast = (try parser.parseAbstractSyntaxTree()).success;
+        defer std.testing.allocator.free(ast.items);
+        try std.testing.expectEqual(@as(usize, 2), ast.items.len);
+        for (ast.items) |item| std.testing.allocator.free(item.import_stmt.path);
+    }
+}
+
+test "large input" {
+    var src = std.ArrayList(u8).empty;
+    defer src.deinit(std.testing.allocator);
+    var expected = std.ArrayList([]const u8).empty;
+    defer expected.deinit(std.testing.allocator);
+    for (0..2000) |_| {
+        try src.appendSlice(std.testing.allocator, "import some_module.sub_module $c$\n");
+        try expected.append(std.testing.allocator, "some_module.sub_module");
+    }
+    try expectOk(src.items, expected.items);
+}
+
+test "out of memory does not leak or double free" {
+    // Fail the n-th allocation for every n until the parse succeeds.
+    const source = "import a.b\nimport c.d.e\nimport f";
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        var parser = Parser.init(failing.allocator(), source);
+        if (parser.parseAbstractSyntaxTree()) |result| {
+            const ast = result.success;
+            for (ast.items) |item| failing.allocator().free(item.import_stmt.path);
+            failing.allocator().free(ast.items);
+            break;
+        } else |err| try std.testing.expectEqual(error.OutOfMemory, err);
+    }
+    // And the same on the failure path (the message itself is allocated).
+    fail_index = 0;
+    while (true) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        var parser = Parser.init(failing.allocator(), "import a\nimport b.\n");
+        if (parser.parseAbstractSyntaxTree()) |result| {
+            failing.allocator().free(result.failure);
+            break;
+        } else |err| try std.testing.expectEqual(error.OutOfMemory, err);
+    }
 }

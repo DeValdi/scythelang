@@ -3,28 +3,26 @@ const Parser = @import("syntax/Parser.zig");
 const util = @import("syntax/util.zig");
 
 pub fn main(init: std.process.Init) !void {
-    std.debug.print("Hello World!\n", .{});
-
     const gpa = init.arena.allocator();
     const io = init.io;
 
-    var args = try init.minimal.args.iterateAllocator(gpa);
-    _ = args.next();
-    const path = args.next() orelse return error.MissingFile;
+    var stdin_buffer: [4096]u8 = undefined;
+    var stdin = std.Io.File.stdin().reader(io, &stdin_buffer);
+    const source = try stdin.interface.allocRemaining(gpa, .unlimited);
 
-    var file = try std.Io.Dir.cwd().openFile(io, path, .{ .mode = .read_only });
-    defer file.close(io);
-
-    var buffer: [4096]u8 = undefined;
-    var parser = Parser{ .gpa = gpa, .reader = file.reader(io, buffer[0..]) };
+    var parser = Parser.init(gpa, source);
 
     const ast = try parser.parseAbstractSyntaxTree();
     switch (ast) {
         .success => |value| util.dump(value),
-        .failure => |value| std.debug.print("{s}", .{value}),
+        .failure => |value| {
+            std.debug.print("error: {s}\n", .{value});
+            std.process.exit(1);
+        },
     }
 }
 
 test "trivial pass" {
+    _ = Parser; // pulls in the tests of Parser.zig
     try std.testing.expect(true);
 }

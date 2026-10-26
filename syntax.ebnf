@@ -52,7 +52,8 @@ enc_char = ? any character permitted by the file encoding ?;
 one_byte_char = ? any character representable by one byte ?;
 
 nl = ? newline ?;
-comment = "$", { enc_char - "$" }, "$"; (* comments cannot contain $ for now *)
+line_break_char = ? any character that can be part of a newline (LF or CR) ?;
+comment = "$", { enc_char - ("$" | line_break_char) }, "$"; (* single-line: closed by a $ on the same line it starts on; cannot contain $ for now *)
 sp = " " | ? tab ? | comment; (* whitespace without newline *)
 ws = sp | nl; (* all whitespace *)
 sep = { sp }, nl, { ws };
