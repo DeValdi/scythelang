@@ -1,5 +1,6 @@
 const std = @import("std");
 const Parser = @import("syntax/Parser.zig");
+const Synthesizer = @import("synthesis/Synthesizer.zig");
 const util = @import("syntax/util.zig");
 
 pub fn main(init: std.process.Init) !void {
@@ -20,6 +21,15 @@ pub fn main(init: std.process.Init) !void {
             std.process.exit(1);
         },
     }
+
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+    const stdout = &stdout_writer.interface;
+
+    const synth = try Synthesizer.init(gpa, 0, "   ", "\n");
+    try synth.synthesize(stdout, &ast.success);
+
+    try stdout.flush();
 }
 
 test "trivial pass" {

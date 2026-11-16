@@ -1,0 +1,1 @@
+.\zig-out\bin\scc.exe < .\testing\test-in.scy > .\testing\test-out.c
