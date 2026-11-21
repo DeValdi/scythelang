@@ -1,3 +1,10 @@
 struct MyStruct {
-    elem: int
+    a: int,
+    b: float,
+    c: bool,
+    d: [5]double,
+    e: *unsigned long,
+    f: SomeNamedType,
+    g: SomeNamedTypeWithGenerics<int, float>,
+    h: *ptrToCoroutine,
 }
